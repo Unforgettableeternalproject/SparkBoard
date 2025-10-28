@@ -76,9 +76,29 @@ export class StorageStack extends cdk.Stack {
             s3.HttpMethods.GET,
             s3.HttpMethods.PUT,
             s3.HttpMethods.POST,
+            s3.HttpMethods.HEAD,
           ],
-          allowedOrigins: ['*'], // Update with your frontend domain
-          allowedHeaders: ['*'],
+          allowedOrigins: [
+            'http://localhost:5173',
+            'http://localhost:5000',
+            'https://*.cloudfront.net',
+            // Add your production domain here
+          ],
+          allowedHeaders: [
+            '*',
+            'Content-Type',
+            'Content-Length',
+            'Authorization',
+            'X-Amz-Date',
+            'X-Amz-Security-Token',
+            'X-Amz-User-Agent',
+          ],
+          exposedHeaders: [
+            'ETag',
+            'x-amz-server-side-encryption',
+            'x-amz-request-id',
+            'x-amz-id-2',
+          ],
           maxAge: 3000,
         },
       ],
