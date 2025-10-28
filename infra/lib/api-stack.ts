@@ -19,6 +19,7 @@ export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
   public readonly healthFunction: lambda.Function;
   public readonly authFunction: lambda.Function;
+  public readonly itemsFunction: lambda.Function;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -61,9 +62,25 @@ export class ApiStack extends cdk.Stack {
       logRetention: logs.RetentionDays.ONE_WEEK,
     });
 
+    // Items Lambda Function
+    this.itemsFunction = new lambda.Function(this, 'ItemsFunction', {
+      functionName: 'SparkBoard-Items',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/items')),
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 512,
+      environment: {
+        TABLE_NAME: table.tableName,
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+    });
+
     // Grant permissions
     table.grantReadData(this.healthFunction); // Health check only reads
     table.grantReadWriteData(this.authFunction); // Auth can write user data
+    table.grantReadWriteData(this.itemsFunction); // Items needs read/write access
 
     // API Gateway REST API
     this.api = new apigateway.RestApi(this, 'SparkBoardApi', {
@@ -129,6 +146,33 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // Items endpoints - /items
+    const itemsResource = this.api.root.addResource('items');
+    
+    // POST /items (requires Cognito JWT)
+    itemsResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // GET /items (requires Cognito JWT)
+    itemsResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
     // Outputs
     new cdk.CfnOutput(this, 'ApiUrl', {
       value: this.api.url,
@@ -155,6 +199,11 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AuthMeEndpoint', {
       value: `${this.api.url}auth/me`,
       description: 'Auth Me Endpoint (requires JWT)',
+    });
+
+    new cdk.CfnOutput(this, 'ItemsEndpoint', {
+      value: `${this.api.url}items`,
+      description: 'Items Endpoint (requires JWT)',
     });
   }
 }

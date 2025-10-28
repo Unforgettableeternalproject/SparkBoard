@@ -22,6 +22,10 @@ export default defineConfig({
       '@': resolve(projectRoot, 'src')
     }
   },
+  define: {
+    // Fix for amazon-cognito-identity-js
+    'global': 'globalThis',
+  },
   server: {
     port: 5173,
     strictPort: true, // Fail if port is already in use

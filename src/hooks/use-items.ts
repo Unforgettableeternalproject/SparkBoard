@@ -1,9 +1,26 @@
-import { useKV } from '@github/spark/hooks'
+import { useState, useEffect } from 'react'
 import { SparkItem, CreateItemInput } from '@/lib/types'
 import { User } from '@/lib/types'
 
 export function useItems(user: User | null) {
-  const [items, setItems] = useKV<SparkItem[]>('spark_items', [])
+  const [items, setItems] = useState<SparkItem[]>([])
+  
+  // Load items from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('spark_items')
+    if (stored) {
+      try {
+        setItems(JSON.parse(stored))
+      } catch (error) {
+        console.error('Failed to parse stored items:', error)
+      }
+    }
+  }, [])
+  
+  // Save items to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('spark_items', JSON.stringify(items))
+  }, [items])
   
   const createItem = (input: CreateItemInput) => {
     if (!user) return
@@ -21,11 +38,11 @@ export function useItems(user: User | null) {
       attachments: input.attachments
     }
     
-    setItems((current) => [newItem, ...(current || [])])
+    setItems((current) => [newItem, ...current])
   }
   
   const deleteItem = (itemId: string) => {
-    setItems((current) => (current || []).filter((item) => item.id !== itemId))
+    setItems((current) => current.filter((item) => item.id !== itemId))
   }
   
   return {
