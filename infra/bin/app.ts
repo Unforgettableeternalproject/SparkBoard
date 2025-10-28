@@ -4,6 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { StorageStack } from '../lib/storage-stack';
 import { AuthStack } from '../lib/auth-stack';
 import { ApiStack } from '../lib/api-stack';
+import { MonitoringStack } from '../lib/monitoring-stack';
 
 const app = new cdk.App();
 
@@ -15,6 +16,11 @@ const env = {
 
 // Stack name prefix
 const stackPrefix = 'SparkBoard';
+
+// Alarm email from context or environment variable
+const alarmEmail = app.node.tryGetContext('alarmEmail') || 
+                  process.env.ALARM_EMAIL || 
+                  'admin@example.com'; // Change this!
 
 // 1. Storage Stack - DynamoDB + S3
 const storageStack = new StorageStack(app, `${stackPrefix}-Storage`, {
@@ -38,9 +44,20 @@ const apiStack = new ApiStack(app, `${stackPrefix}-Api`, {
   userPoolClient: authStack.userPoolClient,
 });
 
+// 4. Monitoring Stack - CloudWatch Dashboard + Alarms
+const monitoringStack = new MonitoringStack(app, `${stackPrefix}-Monitoring`, {
+  env,
+  description: 'SparkBoard Monitoring - CloudWatch Dashboard and Alarms',
+  api: apiStack.api,
+  lambdaFunctions: apiStack.lambdaFunctions,
+  table: storageStack.table,
+  alarmEmail,
+});
+
 // Add stack dependencies
 apiStack.addDependency(storageStack);
 apiStack.addDependency(authStack);
+monitoringStack.addDependency(apiStack);
 
 // Add tags to all resources
 cdk.Tags.of(app).add('Project', 'SparkBoard');

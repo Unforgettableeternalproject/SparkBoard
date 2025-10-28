@@ -55,6 +55,14 @@ export class AuthStack extends cdk.Stack {
       },
     });
 
+    // Admin User Group
+    const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+      userPoolId: this.userPool.userPoolId,
+      groupName: 'Admin',
+      description: 'Administrators with full system access including monitoring',
+      precedence: 1,
+    });
+
     // User Pool Client (for frontend)
     this.userPoolClient = new cognito.UserPoolClient(this, 'SparkBoardWebClient', {
       userPool: this.userPool,

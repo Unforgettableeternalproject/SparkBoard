@@ -1,15 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from './hooks/use-auth'
 import { useItems } from './hooks/use-items'
 import { LoginForm } from './components/LoginForm'
 import { Header } from './components/Header'
 import { ItemList } from './components/ItemList'
+import { MonitoringDashboard } from './pages/MonitoringDashboard'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 
 function App() {
   const { user, isAuthenticated, isLoading, login, logout, loginWithHostedUI, handleOAuthCallback } = useAuth()
   const { items, createItem } = useItems(user)
+  const [currentPage, setCurrentPage] = useState<'items' | 'monitoring'>('items')
 
   // Handle OAuth callback on mount
   useEffect(() => {
@@ -51,9 +53,13 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header user={user!} onLogout={logout} />
+      <Header user={user!} onLogout={logout} onNavigate={setCurrentPage} />
       <main className="container mx-auto px-4 py-8">
-        <ItemList items={items || []} onCreateItem={createItem} />
+        {currentPage === 'items' ? (
+          <ItemList items={items || []} onCreateItem={createItem} />
+        ) : (
+          <MonitoringDashboard />
+        )}
       </main>
       <Toaster />
     </div>
