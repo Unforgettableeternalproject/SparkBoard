@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useKV } from '@github/spark/hooks'
 import {
   CognitoUserPool,
   CognitoUser,
@@ -33,7 +32,17 @@ function sessionToUser(session: CognitoUserSession, username: string): User {
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [idToken, setIdToken] = useKV<string | null>('cognito_id_token', null)
+  const [idToken, setIdToken] = useState<string | null>(null)
+
+  // Save ID token to localStorage
+  const saveIdToken = (token: string | null) => {
+    if (token) {
+      localStorage.setItem('cognito_id_token', token)
+    } else {
+      localStorage.removeItem('cognito_id_token')
+    }
+    setIdToken(token)
+  }
 
   // Check for existing session on mount
   useEffect(() => {
@@ -43,7 +52,7 @@ export function useAuth() {
       cognitoUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
         if (err || !session?.isValid()) {
           setUser(null)
-          setIdToken(null)
+          saveIdToken(null)
           setIsLoading(false)
           return
         }
@@ -52,7 +61,7 @@ export function useAuth() {
         const token = session.getIdToken().getJwtToken()
         
         setUser(user)
-        setIdToken(token)
+        saveIdToken(token)
         setIsLoading(false)
       })
     } else {
@@ -78,13 +87,13 @@ export function useAuth() {
           const token = session.getIdToken().getJwtToken()
           
           setUser(user)
-          setIdToken(token)
+          saveIdToken(token)
           resolve(true)
         },
         onFailure: (err) => {
           console.error('Login failed:', err)
           setUser(null)
-          setIdToken(null)
+          saveIdToken(null)
           resolve(false)
         },
       })
@@ -99,7 +108,7 @@ export function useAuth() {
     }
     
     setUser(null)
-    setIdToken(null)
+    saveIdToken(null)
   }
 
   // Hosted UI Login
@@ -153,7 +162,7 @@ export function useAuth() {
       }
 
       setUser(user)
-      setIdToken(tokens.id_token)
+      saveIdToken(tokens.id_token)
       
       return true
     } catch (error) {

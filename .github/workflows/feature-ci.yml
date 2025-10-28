@@ -1,0 +1,310 @@
+name: Feature Branch CI
+
+# 觸發條件：feature 分支的推送和 PR
+on:
+  push:
+    branches:
+      - 'feature/**'
+  pull_request:
+    branches:
+      - development
+    types: [opened, synchronize, reopened]
+
+# 並發控制：同一 PR 只執行最新的工作流程
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 程式碼品質檢查
+  code-quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true
+      
+      - name: Check TypeScript
+        run: npx tsc --noEmit
+        continue-on-error: true
+      
+      - name: Report lint results
+        if: always()
+        run: |
+          echo "## 📝 Code Quality Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ESLint check completed" >> $GITHUB_STEP_SUMMARY
+
+  # 前端建置測試
+  frontend-build:
+    name: Frontend Build Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Check build size
+        run: |
+          if [ -d "dist" ]; then
+            SIZE=$(du -sh dist | cut -f1)
+            echo "📦 Build size: $SIZE" >> $GITHUB_STEP_SUMMARY
+            ls -lh dist/assets/*.js | head -5 >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-${{ github.sha }}
+          path: dist/
+          retention-days: 7
+
+  # Lambda 服務測試
+  lambda-services:
+    name: Lambda Tests - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [items, auth, health, uploads]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies for ${{ matrix.service }}
+        run: |
+          cd services/${{ matrix.service }}
+          npm install
+      
+      - name: Run tests for ${{ matrix.service }}
+        run: |
+          cd services/${{ matrix.service }}
+          if grep -q "\"test\":" package.json && ! grep -q "echo.*No tests" package.json; then
+            npm test -- --coverage
+          else
+            echo "⚠️  No tests configured for ${{ matrix.service }}"
+          fi
+      
+      - name: Upload coverage
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}-${{ github.sha }}
+          path: services/${{ matrix.service }}/coverage/
+          retention-days: 7
+        continue-on-error: true
+
+  # CDK 基礎設施驗證
+  infrastructure-validation:
+    name: Infrastructure Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install CDK dependencies
+        run: |
+          cd infra
+          npm install
+      
+      - name: Build CDK TypeScript
+        run: |
+          cd infra
+          npm run build
+      
+      - name: CDK Synth (Dry Run)
+        run: |
+          cd infra
+          npx cdk synth --no-lookups > /dev/null
+          echo "✅ CDK synthesis successful" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+      
+      - name: Check CDK diff
+        run: |
+          cd infra
+          echo "## 🏗️  Infrastructure Changes" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          npx cdk diff --no-lookups 2>&1 | head -50 >> $GITHUB_STEP_SUMMARY || echo "No infrastructure deployed yet" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+
+  # 安全性掃描
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Run npm audit
+        run: |
+          npm audit --audit-level=moderate || true
+          echo "## 🔒 Security Scan" >> $GITHUB_STEP_SUMMARY
+          npm audit --audit-level=moderate >> $GITHUB_STEP_SUMMARY || echo "Some vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+      
+      - name: Check for secrets
+        run: |
+          if grep -r -i "aws_access_key\|aws_secret\|password.*=" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" .; then
+            echo "⚠️  Potential secrets found in code!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ No hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+
+  # PR 相關檢查
+  pr-checks:
+    name: Pull Request Checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Check PR title format
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          if [[ $PR_TITLE =~ ^(feat|fix|docs|style|refactor|test|chore|perf)(\(.+\))?:.+ ]]; then
+            echo "✅ PR title follows conventional commits: $PR_TITLE" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️  PR title should follow format: type(scope): description" >> $GITHUB_STEP_SUMMARY
+            echo "Examples: feat: add login, fix(api): correct endpoint" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Check for BREAKING CHANGES
+        run: |
+          if git log --format=%B origin/development..HEAD | grep -q "BREAKING CHANGE"; then
+            echo "⚠️  This PR contains BREAKING CHANGES" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Count changed files
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/development...HEAD | wc -l)
+          echo "📝 Files changed: $CHANGED_FILES" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $CHANGED_FILES -gt 50 ]; then
+            echo "⚠️  Large PR detected ($CHANGED_FILES files). Consider splitting." >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Check branch is up to date
+        run: |
+          git fetch origin development
+          BEHIND=$(git rev-list --count HEAD..origin/development)
+          if [ $BEHIND -gt 0 ]; then
+            echo "⚠️  Branch is $BEHIND commits behind development" >> $GITHUB_STEP_SUMMARY
+            echo "Consider rebasing: git rebase origin/development" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Branch is up to date with development" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # 最終彙總
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, frontend-build, lambda-services, infrastructure-validation, security-scan]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "# 🚀 Feature Branch CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Build | ${{ needs.frontend-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lambda Tests | ${{ needs.lambda-services.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure | ${{ needs.infrastructure-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.code-quality.result }}" == "success" ] && \
+             [ "${{ needs.frontend-build.result }}" == "success" ] && \
+             [ "${{ needs.lambda-services.result }}" == "success" ] && \
+             [ "${{ needs.infrastructure-validation.result }}" == "success" ]; then
+            echo "## ✅ All checks passed!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "This branch is ready to merge into \`development\`" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          else
+            echo "## ❌ Some checks failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please review the failed jobs above and fix the issues." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  # 自動標記 PR (可選)
+  auto-label:
+    name: Auto Label PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Label based on files changed
+        uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true

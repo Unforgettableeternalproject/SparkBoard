@@ -1,0 +1,113 @@
+name: Deploy to Main
+
+# 觸發條件：當 development 分支有推送時
+on:
+  push:
+    branches:
+      - development
+
+# 設定工作流程的權限
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # 第一階段：基本檢查與測試
+  check:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout development branch
+        uses: actions/checkout@v4
+        with:
+          ref: development
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true
+      
+      - name: Install Lambda dependencies and run tests
+        run: |
+          cd services/items
+          npm install
+          npm test
+      
+      - name: Build CDK infrastructure
+        run: |
+          cd infra
+          npm install
+          npm run build
+
+  # 第二階段：合併到 main
+  merge-to-main:
+    name: Merge to Main Branch
+    runs-on: ubuntu-latest
+    needs: check
+    if: success()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Merge development to main
+        run: |
+          git checkout main
+          git merge --no-ff development -m "chore: merge development to main [skip ci]"
+          git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create deployment tag
+        run: |
+          TAG_NAME="deploy-$(date +'%Y%m%d-%H%M%S')"
+          git tag -a "$TAG_NAME" -m "Deployment from development to main"
+          git push origin "$TAG_NAME"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 第三階段：通知結果
+  notify:
+    name: Notify Result
+    runs-on: ubuntu-latest
+    needs: [check, merge-to-main]
+    if: always()
+    
+    steps:
+      - name: Check job results
+        run: |
+          if [ "${{ needs.check.result }}" == "success" ] && [ "${{ needs.merge-to-main.result }}" == "success" ]; then
+            echo "✅ Successfully merged development to main"
+            echo "status=success" >> $GITHUB_ENV
+          else
+            echo "❌ Merge failed"
+            echo "status=failure" >> $GITHUB_ENV
+            exit 1
+          fi
+      
+      - name: Summary
+        run: |
+          echo "## Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Check**: ${{ needs.check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Merge**: ${{ needs.merge-to-main.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: development → main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY

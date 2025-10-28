@@ -1,23 +1,317 @@
-# ✨ Welcome to Your Spark Template!
-You've just launched your brand-new Spark Template Codespace — everything’s fired up and ready for you to explore, build, and create with Spark!
+# 🚀 SparkBoard
 
-This template is your blank canvas. It comes with a minimal setup to help you get started quickly with Spark development.
+**Serverless 任務與公告平台** - 基於 AWS 無伺服器架構的社團任務與檔案分享平台
 
-🚀 What's Inside?
-- A clean, minimal Spark environment
-- Pre-configured for local development
-- Ready to scale with your ideas
-  
-🧠 What Can You Do?
+[![AWS](https://img.shields.io/badge/AWS-Serverless-orange)](https://aws.amazon.com/)
+[![CDK](https://img.shields.io/badge/CDK-TypeScript-blue)](https://aws.amazon.com/cdk/)
+[![React](https://img.shields.io/badge/React-19.0-61DAFB)](https://reactjs.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE.txt)
 
-Right now, this is just a starting point — the perfect place to begin building and testing your Spark applications.
+## 📖 專案簡介
 
-🧹 Just Exploring?
-No problem! If you were just checking things out and don’t need to keep this code:
+SparkBoard 是一個展示完整 AWS Serverless 應用的全端專案，包含：
 
-- Simply delete your Spark.
-- Everything will be cleaned up — no traces left behind.
+- ✅ **使用者認證**：Amazon Cognito 提供註冊/登入功能
+- ✅ **RESTful API**：API Gateway + Lambda 建立無伺服器 API
+- ✅ **資料儲存**：DynamoDB 單表設計 + GSI 索引查詢
+- ✅ **檔案上傳**：S3 Presigned URL
+- ✅ **CI/CD**：GitHub Actions 自動化部署
+- ✅ **監控日誌**：CloudWatch + X-Ray
 
-📄 License For Spark Template Resources 
+## 🏗️ 系統架構
 
-The Spark Template files and resources from GitHub are licensed under the terms of the MIT license, Copyright GitHub, Inc.
+```
+[React Frontend (Vite)]
+        ↓
+   [CloudFront CDN] (Optional)
+        ↓
+ [API Gateway REST API]
+        ↓
+ [Lambda Functions] ──> [DynamoDB: SparkTable]
+        │
+        ├──> [S3: sparkboard-files]
+        └──> [Cognito User Pool]
+```
+
+## 🛠️ 技術堆疊
+
+### 後端基礎設施
+| 技術 | 用途 |
+|------|------|
+| AWS CDK (TypeScript) | 基礎設施即程式碼 (IaC) |
+| API Gateway | REST API 端點 |
+| Lambda (Node.js 18) | 無伺服器運算 |
+| DynamoDB | NoSQL 資料庫 |
+| Cognito | 使用者認證與授權 |
+| S3 | 檔案儲存 |
+| CloudWatch | 日誌與監控 |
+
+### 前端
+| 技術 | 用途 |
+|------|------|
+| React 19 | UI 框架 |
+| TypeScript | 型別安全 |
+| Vite | 建構工具 |
+| TailwindCSS 4 | 樣式框架 |
+| Radix UI | 元件庫 |
+| TanStack Query | 資料擷取與快取 |
+| Amazon Cognito Identity JS | 認證客戶端 |
+
+## 📁 專案結構
+
+```
+SparkBoard/
+├── infra/                      # AWS CDK 基礎設施
+│   ├── bin/app.ts             # CDK App 入口
+│   ├── lib/
+│   │   ├── auth-stack.ts      # Cognito 認證
+│   │   ├── storage-stack.ts   # DynamoDB + S3
+│   │   └── api-stack.ts       # API Gateway + Lambda
+│   └── package.json
+│
+├── services/                   # Lambda 函式
+│   ├── auth/                  # GET /auth/me
+│   │   ├── index.js
+│   │   └── package.json
+│   ├── health/                # GET /health
+│   │   ├── index.js
+│   │   └── package.json
+│   └── items/                 # POST/GET /items
+│       ├── index.js
+│       ├── index.test.js
+│       ├── package.json
+│       └── README.md
+│
+├── src/                       # React 前端
+│   ├── components/            # UI 元件
+│   ├── hooks/                 # React Hooks
+│   ├── lib/                   # 工具函式
+│   └── App.tsx
+│
+├── .github/workflows/         # CI/CD
+│   ├── ci.yml
+│   └── cdk-deploy.yml
+│
+├── package.json               # 前端依賴
+└── README.md
+```
+
+## 🚀 快速開始
+
+### 前置需求
+
+- Node.js 18+ 
+- npm 或 yarn
+- AWS CLI 配置完成
+- AWS CDK CLI (`npm install -g aws-cdk`)
+
+### 1. 安裝依賴
+
+```bash
+# 安裝前端依賴
+npm install
+
+# 安裝 CDK 依賴
+npm run cdk:install
+
+# 安裝 Lambda 服務依賴
+cd services/items && npm install
+cd services/auth && npm install
+cd services/health && npm install
+```
+
+### 2. 部署 AWS 基礎設施
+
+```bash
+# CDK Bootstrap (首次使用)
+cd infra
+cdk bootstrap
+
+# 檢視變更
+npm run diff
+
+# 部署所有堆疊
+npm run deploy
+```
+
+部署完成後，記下輸出的：
+- User Pool ID
+- User Pool Client ID
+- API Gateway URL
+
+### 3. 設定環境變數
+
+複製 `env.example` 為 `env.local` 並填入 CDK 輸出的值：
+
+```bash
+cp env.example env.local
+```
+
+編輯 `env.local`：
+```env
+VITE_AWS_REGION=ap-northeast-1
+VITE_USER_POOL_ID=ap-northeast-1_XXXXXXXXX
+VITE_USER_POOL_CLIENT_ID=xxxxxxxxxxxxxxxxxxxx
+VITE_COGNITO_DOMAIN=sparkboard-xxxxx.auth.ap-northeast-1.amazoncognito.com
+VITE_API_BASE_URL=https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/prod
+VITE_OAUTH_REDIRECT_URI=http://localhost:5173
+VITE_OAUTH_LOGOUT_URI=http://localhost:5173
+```
+
+### 4. 啟動開發伺服器
+
+```bash
+npm run dev
+```
+
+前端將在 http://localhost:5173 啟動
+
+## 📚 API 端點
+
+### 認證端點
+
+| Method | Path | 描述 | 認證 |
+|--------|------|------|------|
+| `GET` | `/health` | 健康檢查 | ❌ |
+| `GET` | `/auth/me` | 取得當前使用者資訊 | ✅ |
+
+### 任務端點
+
+| Method | Path | 描述 | 認證 |
+|--------|------|------|------|
+| `POST` | `/items` | 建立新任務/公告 | ✅ |
+| `GET` | `/items?limit=20&nextToken=xxx` | 查詢任務列表（分頁） | ✅ |
+
+詳細 API 文件請參考 [services/items/README.md](services/items/README.md)
+
+## 🗄️ DynamoDB 資料模型
+
+採用 **Single Table Design**：
+
+| Partition Key | Sort Key | Entity | 用途 |
+|---------------|----------|--------|------|
+| `ORG#<orgId>` | `ITEM#<itemId>` | 任務/公告 | 組織內的項目 |
+| `USER#<userId>` | `ITEM#<itemId>` | 使用者項目 | GSI1: 查詢使用者的所有項目 |
+| `ITEM#ALL` | `<createdAt>` | 全域項目 | GSI2: 查詢最新項目（分頁） |
+
+### Global Secondary Indexes
+
+- **GSI1**: 依使用者查詢 (`GSI1PK`, `GSI1SK`)
+- **GSI2**: 依建立時間排序全平台最新項目 (`GSI2PK`, `GSI2SK`)
+
+## 🧪 測試
+
+### 單元測試
+
+```bash
+# 測試 Lambda 函式
+cd services/items
+npm test
+
+# 測試覆蓋率
+npm run test:coverage
+```
+
+### 整合測試
+
+```bash
+# 使用 Postman 或 curl 測試 API
+curl -X GET https://your-api-url/prod/health
+```
+
+## 🔐 安全性
+
+- ✅ JWT 驗證：使用 Cognito User Pool Authorizer
+- ✅ 最小權限原則：Lambda 僅能存取指定資源
+- ✅ 資料加密：S3 與 DynamoDB 使用 AWS 管理的加密
+- ✅ CORS 設定：限制來源存取
+
+## 📊 監控與日誌
+
+### CloudWatch Logs
+
+Lambda 函式日誌保留 7 天：
+- `/aws/lambda/SparkBoard-Health`
+- `/aws/lambda/SparkBoard-AuthMe`
+- `/aws/lambda/SparkBoard-Items`
+
+### CloudWatch Metrics
+
+API Gateway 和 Lambda 自動記錄：
+- 請求數量
+- 錯誤率
+- 延遲時間
+
+### X-Ray Tracing
+
+啟用後可追蹤完整請求鏈：
+API Gateway → Lambda → DynamoDB
+
+## 💰 成本估算
+
+符合 AWS Free Tier：
+- Lambda: 100 萬次請求/月
+- DynamoDB: 25GB 儲存 + 讀寫容量
+- API Gateway: 100 萬次呼叫/月
+- S3: 5GB 儲存
+
+**預估月成本**: NT$0 ~ $30 (超過免費額度後)
+
+## 🚀 CI/CD Pipeline
+
+### GitHub Actions
+
+1. **CI** (`.github/workflows/ci.yml`)
+   - Lint 檢查
+   - 單元測試
+   - TypeScript 編譯
+
+2. **CD** (`.github/workflows/cdk-deploy.yml`)
+   - CDK Synth
+   - CDK Diff
+   - 自動部署至 AWS
+
+## 📝 開發指令
+
+### 前端
+```bash
+npm run dev          # 開發伺服器
+npm run build        # 生產建置
+npm run preview      # 預覽建置結果
+npm run lint         # ESLint 檢查
+```
+
+### CDK
+```bash
+npm run cdk:synth    # 合成 CloudFormation 範本
+npm run cdk:diff     # 檢視變更
+npm run cdk:deploy   # 部署
+npm run cdk:destroy  # 清除所有資源
+```
+
+### 測試
+```bash
+npm test             # 執行測試
+```
+
+## 🤝 貢獻
+
+歡迎提交 Issue 或 Pull Request！
+
+## 📄 授權
+
+本專案採用 MIT 授權 - 詳見 [LICENSE.txt](LICENSE.txt)
+
+## 🙏 致謝
+
+- AWS SDK for JavaScript
+- React 與 Vite 社群
+- Radix UI 與 TailwindCSS 團隊
+
+## 📞 聯絡資訊
+
+有任何問題或建議，歡迎開啟 Issue 討論！
+
+---
+
+**Built with ❤️ using AWS Serverless**

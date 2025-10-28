@@ -1,0 +1,41 @@
+# 自動標籤配置
+# 根據修改的檔案自動為 PR 添加標籤
+
+# 前端相關
+frontend:
+  - src/**/*
+  - '*.html'
+  - '*.css'
+  - 'tailwind.config.js'
+  - 'vite.config.ts'
+
+# 後端/Lambda
+backend:
+  - services/**/*
+
+# 基礎設施
+infrastructure:
+  - infra/**/*
+  - '.github/workflows/*.yml'
+
+# 文件
+documentation:
+  - '**/*.md'
+  - docs/**/*
+
+# 配置
+configuration:
+  - '*.json'
+  - '*.config.*'
+  - '.env*'
+
+# 測試
+tests:
+  - '**/*.test.*'
+  - '**/*.spec.*'
+
+# 依賴
+dependencies:
+  - 'package.json'
+  - 'package-lock.json'
+  - '**/package.json'
