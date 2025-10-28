@@ -1,0 +1,16 @@
+.spark-initial-sha
+PRD.md
+index.html
+spark.meta.json
+src/App.tsx
+src/components/CreateItemDialog.tsx
+src/components/Header.tsx
+src/components/ItemCard.tsx
+src/components/ItemList.tsx
+src/components/LoginForm.tsx
+src/hooks/use-auth.ts
+src/hooks/use-items.ts
+src/index.css
+src/lib/helpers.ts
+src/lib/types.ts
+src/main.tsx
