@@ -1,0 +1,20 @@
+{
+  "name": "sparkboard-uploads-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lambda handler for S3 file uploads using Presigned URLs",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --verbose",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.723.0",
+    "@aws-sdk/s3-request-presigner": "^3.723.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
