@@ -1,10 +1,11 @@
-name: Deploy to Main
+name: Merge Development to Main
 
 # 觸發條件：當 development 分支有推送時
 on:
   push:
     branches:
       - development
+  workflow_dispatch:
 
 # 設定工作流程的權限
 permissions:
@@ -37,11 +38,22 @@ jobs:
         run: npm run lint
         continue-on-error: true
       
-      - name: Install Lambda dependencies and run tests
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Run all Lambda tests
         run: |
-          cd services/items
-          npm install
-          npm test
+          for service in items auth health uploads; do
+            if [ -d "services/$service" ]; then
+              echo "Testing $service..."
+              cd services/$service
+              npm install
+              if grep -q "\"test\":" package.json; then
+                npm test || exit 1
+              fi
+              cd ../..
+            fi
+          done
       
       - name: Build CDK infrastructure
         run: |
@@ -71,16 +83,19 @@ jobs:
       - name: Merge development to main
         run: |
           git checkout main
-          git merge --no-ff development -m "chore: merge development to main [skip ci]"
+          git merge --no-ff development -m "chore: merge development to main"
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Create deployment tag
+      - name: Create release tag
         run: |
-          TAG_NAME="deploy-$(date +'%Y%m%d-%H%M%S')"
-          git tag -a "$TAG_NAME" -m "Deployment from development to main"
+          TAG_NAME="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          git tag -a "$TAG_NAME" -m "Release from development - $(date +'%Y-%m-%d %H:%M:%S')"
           git push origin "$TAG_NAME"
+          echo "## 🏷️  Release Tag Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`$TAG_NAME\`" >> $GITHUB_STEP_SUMMARY
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -105,9 +120,14 @@ jobs:
       
       - name: Summary
         run: |
-          echo "## Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔀 Merge Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Check**: ${{ needs.check.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Merge**: ${{ needs.merge-to-main.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: development → main" >> $GITHUB_STEP_SUMMARY
-          echo "- **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Quality Checks | ${{ needs.check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Merge to Main | ${{ needs.merge-to-main.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** development → main" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ℹ️  **Next Steps:** Push to main will trigger automatic deployment via \`cdk-deploy.yml\`" >> $GITHUB_STEP_SUMMARY

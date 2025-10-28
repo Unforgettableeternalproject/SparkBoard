@@ -1,0 +1,266 @@
+name: CDK Deploy to AWS
+
+# 觸發條件：
+# 1. 推送到 main 分支時自動部署
+# 2. 手動觸發部署
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+# 權限設定 - OIDC 需要 id-token: write
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # 第一階段：CI 檢查
+  ci-checks:
+    name: CI Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Run Lambda tests
+        run: |
+          for service in items auth health uploads; do
+            if [ -d "services/$service" ]; then
+              echo "Testing $service..."
+              cd services/$service
+              npm install
+              if grep -q "\"test\":" package.json; then
+                npm test
+              fi
+              cd ../..
+            fi
+          done
+      
+      - name: Build CDK infrastructure
+        run: |
+          cd infra
+          npm install
+          npm run build
+
+  # 第二階段：CDK 部署
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: ci-checks
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          role-session-name: GitHubActions-SparkBoard-Deploy
+      
+      - name: Verify AWS credentials
+        run: |
+          aws sts get-caller-identity
+          echo "✅ Successfully authenticated with AWS"
+      
+      - name: Check CDK Bootstrap
+        run: |
+          cd infra
+          npm install
+          
+          # Check if CDK bootstrap stack exists
+          if aws cloudformation describe-stacks --stack-name CDKToolkit --region ${{ vars.AWS_REGION || 'us-east-1' }} 2>/dev/null; then
+            echo "✅ CDK Bootstrap stack exists"
+          else
+            echo "❌ CDK Bootstrap stack not found!"
+            echo "Please run: cdk bootstrap aws://ACCOUNT_ID/${{ vars.AWS_REGION || 'us-east-1' }}"
+            exit 1
+          fi
+      
+      - name: CDK Synth
+        run: |
+          cd infra
+          npx cdk synth --all
+          echo "✅ CDK synthesis successful"
+      
+      - name: CDK Diff
+        run: |
+          cd infra
+          echo "## 🔄 Infrastructure Changes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`diff" >> $GITHUB_STEP_SUMMARY
+          npx cdk diff --all 2>&1 | head -100 >> $GITHUB_STEP_SUMMARY || echo "No changes detected" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+      
+      - name: CDK Deploy
+        run: |
+          cd infra
+          npx cdk deploy --all \
+            --require-approval never \
+            --progress events \
+            --outputs-file ../cdk-outputs.json
+          
+          echo "✅ Deployment successful"
+      
+      - name: Extract API Endpoint
+        id: api-endpoint
+        run: |
+          if [ -f cdk-outputs.json ]; then
+            API_URL=$(jq -r '.["SparkBoard-Api"].ApiEndpoint // empty' cdk-outputs.json)
+            if [ -n "$API_URL" ]; then
+              echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+              echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**API Endpoint:** $API_URL" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+      
+      - name: Upload CDK outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-outputs
+          path: cdk-outputs.json
+          retention-days: 30
+        if: always()
+      
+      - name: Test API Health
+        run: |
+          API_URL="${{ steps.api-endpoint.outputs.api_url }}"
+          if [ -n "$API_URL" ]; then
+            echo "Testing API health endpoint..."
+            HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" || echo "000")
+            
+            if [ "$HEALTH_RESPONSE" = "200" ]; then
+              echo "✅ API health check passed"
+              echo "**Health Check:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️  API health check returned: $HEALTH_RESPONSE"
+              echo "**Health Check:** ⚠️  Status $HEALTH_RESPONSE" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+        continue-on-error: true
+
+  # 第三階段：部署後驗證
+  post-deploy:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: success()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download CDK outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-outputs
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      
+      - name: Verify Stack Status
+        run: |
+          echo "## 📊 Stack Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for stack in SparkBoard-Storage SparkBoard-Auth SparkBoard-Api; do
+            STATUS=$(aws cloudformation describe-stacks \
+              --stack-name "$stack" \
+              --query 'Stacks[0].StackStatus' \
+              --output text 2>/dev/null || echo "NOT_FOUND")
+            
+            if [[ "$STATUS" == *"COMPLETE"* ]]; then
+              echo "- ✅ $stack: $STATUS" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ⚠️  $stack: $STATUS" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+      
+      - name: List Lambda Functions
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔧 Lambda Functions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          aws lambda list-functions \
+            --query "Functions[?starts_with(FunctionName, 'SparkBoard-')].{Name:FunctionName, Runtime:Runtime, Modified:LastModified}" \
+            --output table >> $GITHUB_STEP_SUMMARY || echo "No Lambda functions found" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Create deployment record
+        run: |
+          echo "Deployment completed at $(date -u)"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Environment: ${{ github.event.inputs.environment || 'production' }}"
+
+  # 第四階段：失敗回滾（可選）
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [deploy, post-deploy]
+    if: failure() && github.event_name == 'push'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      
+      - name: Notify failure
+        run: |
+          echo "## ⚠️  Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment has failed. Manual intervention may be required." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Troubleshooting:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check CloudFormation console for detailed error messages" >> $GITHUB_STEP_SUMMARY
+          echo "2. Review Lambda function logs in CloudWatch" >> $GITHUB_STEP_SUMMARY
+          echo "3. Verify IAM role permissions" >> $GITHUB_STEP_SUMMARY
+          echo "4. Ensure CDK bootstrap is up to date" >> $GITHUB_STEP_SUMMARY
