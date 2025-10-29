@@ -7,7 +7,7 @@
  */
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
 const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('../shared/permissions');
 
@@ -340,6 +340,174 @@ async function deleteItem(event) {
 }
 
 /**
+ * PATCH /items/:sk - Update an item (task status, subtasks completion)
+ */
+async function updateItem(event) {
+  console.log('Updating item:', JSON.stringify(event, null, 2));
+
+  try {
+    const user = getUserFromEvent(event);
+    if (!user) {
+      return createErrorResponse(401, 'Unauthorized', 'No valid authorization token provided');
+    }
+
+    // Extract item SK from path parameters
+    const sk = event.pathParameters?.sk;
+    if (!sk) {
+      return createErrorResponse(400, 'BadRequest', 'Item SK is required');
+    }
+
+    // Parse request body
+    const body = JSON.parse(event.body || '{}');
+
+    // Query the item to check ownership and type
+    const queryCommand = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND SK = :sk',
+      ExpressionAttributeValues: {
+        ':pk': `ORG#${user.orgId}`,
+        ':sk': sk,
+      },
+    });
+
+    const queryResult = await docClient.send(queryCommand);
+    
+    if (!queryResult.Items || queryResult.Items.length === 0) {
+      return createErrorResponse(404, 'NotFound', 'Item not found');
+    }
+
+    const item = queryResult.Items[0];
+    
+    // Check permissions - only owner or admin can update
+    const action = item.type === 'announcement' ? 'update:announcement' : 'update:task';
+    const resource = { userId: item.userId };
+    
+    if (!checkPermission(user, action, resource)) {
+      return createErrorResponse(403, 'Forbidden', 'You do not have permission to update this item');
+    }
+
+    // Prepare update expression
+    const updateExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    let counter = 0;
+
+    // Update task-specific fields
+    if (item.type === 'task') {
+      if (body.status !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'status';
+        expressionAttributeValues[`:val${counter}`] = body.status;
+
+        // If completing task, add completedAt
+        if (body.status === 'completed') {
+          counter++;
+          updateExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+        }
+      }
+
+      if (body.subtasks !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'subtasks';
+        expressionAttributeValues[`:val${counter}`] = body.subtasks;
+
+        // Auto-complete task if all subtasks are completed
+        const allCompleted = body.subtasks.every(st => st.completed);
+        if (allCompleted && body.subtasks.length > 0 && item.status !== 'completed') {
+          counter++;
+          updateExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'status';
+          expressionAttributeValues[`:val${counter}`] = 'completed';
+
+          counter++;
+          updateExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+        }
+      }
+    }
+
+    // Update common fields
+    if (body.title !== undefined) {
+      counter++;
+      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'title';
+      expressionAttributeValues[`:val${counter}`] = body.title;
+    }
+
+    if (body.content !== undefined) {
+      counter++;
+      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'content';
+      expressionAttributeValues[`:val${counter}`] = body.content;
+    }
+
+    // Always update updatedAt
+    counter++;
+    updateExpressions.push(`#attr${counter} = :val${counter}`);
+    expressionAttributeNames[`#attr${counter}`] = 'updatedAt';
+    expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+
+    if (updateExpressions.length === 0) {
+      return createErrorResponse(400, 'BadRequest', 'No valid fields to update');
+    }
+
+    // Update the item in DynamoDB
+    const updateCommand = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `ORG#${user.orgId}`,
+        SK: sk,
+      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
+    });
+
+    const updateResult = await docClient.send(updateCommand);
+
+    console.log('Item updated successfully:', sk);
+
+    return createResponse(200, {
+      success: true,
+      message: 'Item updated successfully',
+      item: {
+        id: updateResult.Attributes.itemId,
+        pk: updateResult.Attributes.pk,
+        sk: updateResult.Attributes.sk,
+        orgId: updateResult.Attributes.orgId,
+        userId: updateResult.Attributes.userId,
+        userName: updateResult.Attributes.username,
+        title: updateResult.Attributes.title,
+        content: updateResult.Attributes.content,
+        type: updateResult.Attributes.type,
+        status: updateResult.Attributes.status,
+        attachments: updateResult.Attributes.attachments,
+        createdAt: updateResult.Attributes.createdAt,
+        updatedAt: updateResult.Attributes.updatedAt,
+        subtasks: updateResult.Attributes.subtasks,
+        deadline: updateResult.Attributes.deadline,
+        completedAt: updateResult.Attributes.completedAt,
+        priority: updateResult.Attributes.priority,
+        expiresAt: updateResult.Attributes.expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating item:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to update item',
+      details: error.message,
+    });
+  }
+}
+
+/**
  * Main Lambda handler
  */
 exports.handler = async (event) => {
@@ -357,6 +525,8 @@ exports.handler = async (event) => {
         return await createItem(event);
       case 'GET':
         return await getItems(event);
+      case 'PATCH':
+        return await updateItem(event);
       case 'DELETE':
         return await deleteItem(event);
       case 'OPTIONS':

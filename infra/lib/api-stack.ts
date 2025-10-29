@@ -238,6 +238,18 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // PATCH /items/{sk} (requires Cognito JWT) - Update task/announcement
+    itemBySkResource.addMethod(
+      'PATCH',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
     // Uploads endpoints - /uploads/*
     const uploadsResource = this.api.root.addResource('uploads');
     

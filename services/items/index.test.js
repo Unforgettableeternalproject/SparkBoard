@@ -13,6 +13,7 @@ process.env.NODE_ENV = 'test';
 const mockPut = jest.fn();
 const mockQuery = jest.fn();
 const mockDelete = jest.fn();
+const mockUpdate = jest.fn();
 
 jest.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: jest.fn(() => ({})),
@@ -31,6 +32,9 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
         if (command.constructor.name === 'DeleteCommand') {
           return mockDelete(command);
         }
+        if (command.constructor.name === 'UpdateCommand') {
+          return mockUpdate(command);
+        }
       }),
     })),
   },
@@ -45,6 +49,11 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
     }
   },
   DeleteCommand: class DeleteCommand {
+    constructor(input) {
+      this.input = input;
+    }
+  },
+  UpdateCommand: class UpdateCommand {
     constructor(input) {
       this.input = input;
     }
@@ -478,7 +487,7 @@ describe('Items Lambda Handler', () => {
 
   describe('Unsupported methods', () => {
     test('should reject unsupported HTTP methods', async () => {
-      const event = createMockEvent('PATCH');
+      const event = createMockEvent('PUT');
 
       const response = await handler(event);
       const body = JSON.parse(response.body);
@@ -677,6 +686,154 @@ describe('Items Lambda Handler', () => {
       expect(body.items[1].expiresAt).toBe('2025-06-30T00:00:00Z');
       
       expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('PATCH /items/{sk}', () => {
+    beforeEach(() => {
+      mockQuery.mockClear();
+      mockUpdate.mockClear();
+    });
+
+    test('should update task status to completed', async () => {
+      const event = createMockEvent('PATCH', {
+        status: 'completed',
+      }, null, { sk: 'ITEM#task-123' });
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'test-user-123',
+          status: 'active',
+        }],
+      });
+
+      mockUpdate.mockResolvedValue({
+        Attributes: {
+          itemId: 'task-123',
+          pk: 'ORG#test-org',
+          sk: 'ITEM#task-123',
+          type: 'task',
+          status: 'completed',
+          completedAt: '2025-10-29T12:00:00Z',
+          username: 'testuser',
+          title: 'Test Task',
+          content: 'Test content',
+          createdAt: '2025-10-29T10:00:00Z',
+          updatedAt: '2025-10-29T12:00:00Z',
+          subtasks: [],
+          attachments: [],
+        },
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.item.status).toBe('completed');
+      expect(body.item.completedAt).toBeDefined();
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should update subtasks and auto-complete task when all done', async () => {
+      const event = createMockEvent('PATCH', {
+        subtasks: [
+          { id: 'st-1', title: 'Subtask 1', completed: true },
+          { id: 'st-2', title: 'Subtask 2', completed: true },
+        ],
+      }, null, { sk: 'ITEM#task-123' });
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'test-user-123',
+          status: 'active',
+        }],
+      });
+
+      mockUpdate.mockResolvedValue({
+        Attributes: {
+          itemId: 'task-123',
+          pk: 'ORG#test-org',
+          sk: 'ITEM#task-123',
+          type: 'task',
+          status: 'completed',
+          subtasks: [
+            { id: 'st-1', title: 'Subtask 1', completed: true },
+            { id: 'st-2', title: 'Subtask 2', completed: true },
+          ],
+          completedAt: '2025-10-29T12:00:00Z',
+          username: 'testuser',
+          title: 'Test Task',
+          content: 'Test content',
+          createdAt: '2025-10-29T10:00:00Z',
+          updatedAt: '2025-10-29T12:00:00Z',
+          attachments: [],
+        },
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.item.subtasks).toHaveLength(2);
+      expect(body.item.subtasks.every(st => st.completed)).toBe(true);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject update without sk parameter', async () => {
+      const event = createMockEvent('PATCH', { status: 'completed' });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(400);
+      expect(body.error).toBe('BadRequest');
+      expect(body.message).toContain('Item SK is required');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test('should reject update of other user item', async () => {
+      const event = createMockEvent('PATCH', {
+        status: 'completed',
+      }, null, { sk: 'ITEM#task-123' });
+      // Change to non-admin user
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'other-user-456',
+        }],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test('should reject update without authorization', async () => {
+      const event = createMockEvent('PATCH', { status: 'completed' }, null, { sk: 'ITEM#task-123' });
+      delete event.requestContext.authorizer;
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(401);
+      expect(body.error).toBe('Unauthorized');
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 });
