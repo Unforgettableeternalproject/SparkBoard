@@ -2,11 +2,12 @@
  * Items Lambda Handler
  * POST /items - Create a new item
  * GET /items - Query items with pagination
+ * DELETE /items/:sk - Delete an item
  * Requires Cognito JWT token in Authorization header
  */
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
 
 // Initialize DynamoDB client
@@ -51,6 +52,7 @@ function getUserFromEvent(event) {
     username: claims['cognito:username'] || claims.username,
     email: claims.email,
     orgId: claims['custom:orgId'] || 'sparkboard-demo',
+    groups: claims['cognito:groups'] ? claims['cognito:groups'].split(',') : [],
   };
 }
 
@@ -81,7 +83,7 @@ async function createItem(event) {
     }
 
     // Validate required fields
-    const { title, content, type } = body;
+    const { title, content, type, attachments } = body;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return createResponse(400, {
         error: 'ValidationError',
@@ -99,6 +101,8 @@ async function createItem(event) {
       // Primary key: ORG#<orgId> / ITEM#<itemId>
       PK: `ORG#${orgId}`,
       SK: `ITEM#${itemId}`,
+      pk: `ORG#${orgId}`,
+      sk: `ITEM#${itemId}`,
       
       // GSI1: Query items by user
       GSI1PK: `USER#${user.userId}`,
@@ -120,6 +124,7 @@ async function createItem(event) {
       content: content?.trim() || '',
       type: type || 'task', // task, announcement, etc.
       status: 'active',
+      attachments: attachments || [],
       
       createdAt,
       updatedAt: createdAt,
@@ -138,14 +143,19 @@ async function createItem(event) {
     return createResponse(201, {
       success: true,
       item: {
+        id: item.itemId,
         itemId: item.itemId,
+        pk: item.pk,
+        sk: item.sk,
         orgId: item.orgId,
         userId: item.userId,
+        userName: item.username,
         username: item.username,
         title: item.title,
         content: item.content,
         type: item.type,
         status: item.status,
+        attachments: item.attachments,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
       },
@@ -220,16 +230,19 @@ async function getItems(event) {
 
     // Format items for response
     const items = (result.Items || []).map((item) => ({
-      itemId: item.itemId,
+      id: item.itemId,
+      pk: item.pk,
+      sk: item.sk,
       orgId: item.orgId,
       userId: item.userId,
-      username: item.username,
+      userName: item.username,
       title: item.title,
       content: item.content,
       type: item.type,
       status: item.status,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      attachments: item.attachments,
     }));
 
     // Generate next token if there are more results
@@ -260,6 +273,92 @@ async function getItems(event) {
 }
 
 /**
+ * DELETE /items/:sk - Delete an item
+ */
+async function deleteItem(event) {
+  console.log('Deleting item:', JSON.stringify(event, null, 2));
+
+  try {
+    const user = getUserFromEvent(event);
+    if (!user) {
+      return createResponse(401, {
+        error: 'Unauthorized',
+        message: 'No valid authorization token provided',
+      });
+    }
+
+    // Extract item SK from path parameters
+    const sk = event.pathParameters?.sk;
+    if (!sk) {
+      return createResponse(400, {
+        error: 'BadRequest',
+        message: 'Item SK is required',
+      });
+    }
+
+    // Check if user is admin
+    const groups = user.groups || [];
+    const isAdmin = groups.includes('Admin');
+
+    // If not admin, verify the item belongs to the user
+    if (!isAdmin) {
+      // First, query the item to check ownership
+      const queryCommand = new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: 'PK = :pk AND SK = :sk',
+        ExpressionAttributeValues: {
+          ':pk': `ORG#${user.orgId}`,
+          ':sk': sk,
+        },
+      });
+
+      const queryResult = await docClient.send(queryCommand);
+      
+      if (!queryResult.Items || queryResult.Items.length === 0) {
+        return createResponse(404, {
+          error: 'NotFound',
+          message: 'Item not found',
+        });
+      }
+
+      const item = queryResult.Items[0];
+      if (item.userId !== user.userId) {
+        return createResponse(403, {
+          error: 'Forbidden',
+          message: 'You do not have permission to delete this item',
+        });
+      }
+    }
+
+    // Delete the item
+    const deleteCommand = new DeleteCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `ORG#${user.orgId}`,
+        SK: sk,
+      },
+    });
+
+    await docClient.send(deleteCommand);
+
+    console.log('Item deleted successfully:', sk);
+
+    return createResponse(200, {
+      success: true,
+      message: 'Item deleted successfully',
+      sk,
+    });
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to delete item',
+      details: error.message,
+    });
+  }
+}
+
+/**
  * Main Lambda handler
  */
 exports.handler = async (event) => {
@@ -277,6 +376,8 @@ exports.handler = async (event) => {
         return await createItem(event);
       case 'GET':
         return await getItems(event);
+      case 'DELETE':
+        return await deleteItem(event);
       case 'OPTIONS':
         // Handle CORS preflight
         return createResponse(200, { message: 'OK' });
