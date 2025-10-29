@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -77,11 +78,6 @@ interface Alarms {
 
 export function MonitoringDashboard() {
   const { user, idToken } = useAuth();
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [traces, setTraces] = useState<Traces | null>(null);
-  const [alarms, setAlarms] = useState<Alarms | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -94,58 +90,64 @@ export function MonitoringDashboard() {
     }
   }, [user]);
 
-  // Fetch monitoring data
-  const fetchMonitoringData = async () => {
-    if (!idToken) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Fetch metrics
-      const metricsResponse = await fetch(`${API_URL}/monitoring/metrics`, {
-        headers: {
-          Authorization: idToken,
-        },
-      });
-      if (!metricsResponse.ok) throw new Error(`Metrics: ${metricsResponse.statusText}`);
-      const metricsData = await metricsResponse.json();
-      setMetrics(metricsData);
-
-      // Fetch traces
-      const tracesResponse = await fetch(`${API_URL}/monitoring/traces`, {
-        headers: {
-          Authorization: idToken,
-        },
-      });
-      if (!tracesResponse.ok) throw new Error(`Traces: ${tracesResponse.statusText}`);
-      const tracesData = await tracesResponse.json();
-      setTraces(tracesData);
-
-      // Fetch alarms
-      const alarmsResponse = await fetch(`${API_URL}/monitoring/alarms`, {
-        headers: {
-          Authorization: idToken,
-        },
-      });
-      if (!alarmsResponse.ok) throw new Error(`Alarms: ${alarmsResponse.statusText}`);
-      const alarmsData = await alarmsResponse.json();
-      setAlarms(alarmsData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch monitoring data');
-    } finally {
-      setLoading(false);
-    }
+  // Fetch functions with React Query
+  const fetchMetrics = async () => {
+    if (!idToken) throw new Error('No auth token');
+    const response = await fetch(`${API_URL}/monitoring/metrics`, {
+      headers: { Authorization: idToken },
+    });
+    if (!response.ok) throw new Error(`Metrics: ${response.statusText}`);
+    return response.json();
   };
 
-  useEffect(() => {
-    if (isAdmin && idToken) {
-      fetchMonitoringData();
-      // Auto-refresh every 60 seconds
-      const interval = setInterval(fetchMonitoringData, 60000);
-      return () => clearInterval(interval);
-    }
-  }, [isAdmin, idToken]);
+  const fetchTraces = async () => {
+    if (!idToken) throw new Error('No auth token');
+    const response = await fetch(`${API_URL}/monitoring/traces`, {
+      headers: { Authorization: idToken },
+    });
+    if (!response.ok) throw new Error(`Traces: ${response.statusText}`);
+    return response.json();
+  };
+
+  const fetchAlarms = async () => {
+    if (!idToken) throw new Error('No auth token');
+    const response = await fetch(`${API_URL}/monitoring/alarms`, {
+      headers: { Authorization: idToken },
+    });
+    if (!response.ok) throw new Error(`Alarms: ${response.statusText}`);
+    return response.json();
+  };
+
+  // Use React Query for automatic caching and refetching
+  const { data: metrics, isLoading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useQuery<Metrics>({
+    queryKey: ['monitoring', 'metrics'],
+    queryFn: fetchMetrics,
+    enabled: isAdmin && !!idToken,
+    refetchInterval: 60000, // Auto-refresh every 60 seconds
+  });
+
+  const { data: traces, isLoading: tracesLoading, error: tracesError, refetch: refetchTraces } = useQuery<Traces>({
+    queryKey: ['monitoring', 'traces'],
+    queryFn: fetchTraces,
+    enabled: isAdmin && !!idToken,
+    refetchInterval: 60000,
+  });
+
+  const { data: alarms, isLoading: alarmsLoading, error: alarmsError, refetch: refetchAlarms } = useQuery<Alarms>({
+    queryKey: ['monitoring', 'alarms'],
+    queryFn: fetchAlarms,
+    enabled: isAdmin && !!idToken,
+    refetchInterval: 60000,
+  });
+
+  const loading = metricsLoading || tracesLoading || alarmsLoading;
+  const error = metricsError || tracesError || alarmsError;
+
+  const handleRefresh = () => {
+    refetchMetrics();
+    refetchTraces();
+    refetchAlarms();
+  };
 
   // Helper function to get latest metric value
   const getLatestValue = (metric?: Metric): string => {
@@ -174,40 +176,15 @@ export function MonitoringDashboard() {
     }
   };
 
-  if (!user) {
-    return (
-      <div className="container mx-auto p-6">
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Authentication Required</AlertTitle>
-          <AlertDescription>Please log in to access the monitoring dashboard.</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
-          <Shield className="h-4 w-4" />
-          <AlertTitle>Access Denied</AlertTitle>
-          <AlertDescription>
-            You need administrator privileges to access this dashboard.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
+  // Only render monitoring content, auth/admin checks handled by AdminDashboard
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="space-y-6">{/* Removed container/padding since AdminDashboard provides it */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Monitoring Dashboard</h1>
           <p className="text-muted-foreground">Real-time system metrics and alerts</p>
         </div>
-        <Button onClick={fetchMonitoringData} disabled={loading} variant="outline">
+        <Button onClick={handleRefresh} disabled={loading} variant="outline">
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -217,7 +194,7 @@ export function MonitoringDashboard() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error instanceof Error ? error.message : 'Failed to fetch monitoring data'}</AlertDescription>
         </Alert>
       )}
 
@@ -372,13 +349,15 @@ export function MonitoringDashboard() {
                   {traces.summaries.length === 0 ? (
                     <p className="text-muted-foreground">No traces found</p>
                   ) : (
-                    traces.summaries.map((trace) => (
+                    traces.summaries.map((trace, index) => (
                       <div
-                        key={trace.Id}
+                        key={trace.Id || `trace-${index}-${Date.now()}`}
                         className="flex items-center justify-between border-b pb-2 last:border-0"
                       >
                         <div className="flex-1">
-                          <p className="font-mono text-sm">{trace.Id.substring(0, 20)}...</p>
+                          <p className="font-mono text-sm">
+                            {(trace.Id || 'unknown').substring(0, 20)}...
+                          </p>
                           {trace.Http && (
                             <p className="text-sm text-muted-foreground">
                               {trace.Http.HttpMethod} {trace.Http.HttpURL}
@@ -399,7 +378,9 @@ export function MonitoringDashboard() {
                               {trace.Http.HttpStatus}
                             </Badge>
                           )}
-                          <span className="text-sm font-medium">{trace.Duration.toFixed(2)}s</span>
+                          <span className="text-sm font-medium">
+                            {(trace.Duration || 0).toFixed(2)}s
+                          </span>
                         </div>
                       </div>
                     ))

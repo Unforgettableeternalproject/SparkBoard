@@ -94,7 +94,6 @@ export class ApiStack extends cdk.Stack {
       memorySize: 256,
       environment: {
         BUCKET_NAME: bucket.bucketName,
-        AWS_REGION: this.region,
         NODE_ENV: 'production',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
@@ -217,6 +216,19 @@ export class ApiStack extends cdk.Stack {
     // GET /items (requires Cognito JWT)
     itemsResource.addMethod(
       'GET',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // DELETE /items/{sk} (requires Cognito JWT)
+    const itemBySkResource = itemsResource.addResource('{sk}');
+    itemBySkResource.addMethod(
+      'DELETE',
       new apigateway.LambdaIntegration(this.itemsFunction, {
         proxy: true,
       }),

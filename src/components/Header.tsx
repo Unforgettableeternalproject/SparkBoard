@@ -1,4 +1,5 @@
 import { User } from '@/lib/types'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -8,10 +9,9 @@ import { SignOut, User as UserIcon, ChartBar, Table } from '@phosphor-icons/reac
 interface HeaderProps {
   user: User
   onLogout: () => void
-  onNavigate?: (page: 'items' | 'monitoring') => void
 }
 
-export function Header({ user, onLogout, onNavigate }: HeaderProps) {
+export function Header({ user, onLogout }: HeaderProps) {
   const initials = user.name
     .split(' ')
     .map((n) => n[0])
@@ -38,28 +38,30 @@ export function Header({ user, onLogout, onNavigate }: HeaderProps) {
           </div>
           
           <div className="flex items-center gap-2">
-            {onNavigate && (
-              <div className="flex gap-1 mr-2">
+            <div className="flex gap-1 mr-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+              >
+                <Link to="/">
+                  <Table className="mr-2" size={16} />
+                  Items
+                </Link>
+              </Button>
+              {isAdmin && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => onNavigate('items')}
+                  asChild
                 >
-                  <Table className="mr-2" size={16} />
-                  Items
-                </Button>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onNavigate('monitoring')}
-                  >
+                  <Link to="/admin">
                     <ChartBar className="mr-2" size={16} />
-                    Monitoring
-                  </Button>
-                )}
-              </div>
-            )}
+                    Admin
+                  </Link>
+                </Button>
+              )}
+            </div>
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

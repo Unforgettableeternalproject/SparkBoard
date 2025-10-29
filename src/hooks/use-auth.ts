@@ -26,6 +26,7 @@ function sessionToUser(session: CognitoUserSession, username: string): User {
     email: payload.email || username,
     name: payload.name || payload['cognito:username'] || username,
     orgId: payload['custom:orgId'] || 'ORG#sparkboard-demo',
+    'cognito:groups': payload['cognito:groups'] || [],
   }
 }
 
@@ -159,6 +160,7 @@ export function useAuth() {
         email: idTokenPayload.email,
         name: idTokenPayload.name || idTokenPayload['cognito:username'],
         orgId: idTokenPayload['custom:orgId'] || 'ORG#sparkboard-demo',
+        'cognito:groups': idTokenPayload['cognito:groups'] || [],
       }
 
       setUser(user)

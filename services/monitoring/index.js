@@ -227,28 +227,24 @@ async function getMetrics(event) {
 async function getTraces(event) {
   console.log('Fetching X-Ray traces...');
 
-  const hours = parseInt(event.queryStringParameters?.hours || '1', 10);
+  const minutes = parseInt(event.queryStringParameters?.minutes || '10', 10);
   const endTime = new Date();
-  const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
+  const startTime = new Date(endTime.getTime() - minutes * 60 * 1000);
 
   try {
-    // Get trace summaries
+    // Get trace summaries with simplified query
     const summariesResponse = await xray.send(
       new GetTraceSummariesCommand({
         StartTime: startTime,
         EndTime: endTime,
-        Sampling: true,
-        SamplingStrategy: {
-          Name: 'PartialScan',
-          Value: 0.1, // Sample 10% of traces
-        },
+        Sampling: false, // Get all traces in the time range
       })
     );
 
     const traceSummaries = summariesResponse.TraceSummaries || [];
 
-    // Get detailed traces for the first 10
-    const traceIds = traceSummaries.slice(0, 10).map((t) => t.Id);
+    // Get detailed traces for the first 5 (reduced to avoid timeout)
+    const traceIds = traceSummaries.slice(0, 5).map((t) => t.Id);
 
     let traces = [];
     if (traceIds.length > 0) {
@@ -263,7 +259,7 @@ async function getTraces(event) {
 
     return createResponse(200, {
       success: true,
-      period: `${hours} hours`,
+      period: `${minutes} minutes`,
       summaries: traceSummaries.map((summary) => ({
         id: summary.Id,
         duration: summary.Duration,
