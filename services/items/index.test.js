@@ -169,6 +169,74 @@ describe('Items Lambda Handler', () => {
       expect(response.statusCode).toBe(500);
       expect(body.error).toBe('InternalServerError');
     });
+
+    test('should create announcement as moderator', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Important Announcement',
+        content: 'This is an important announcement',
+        type: 'announcement',
+        priority: 'high',
+        expiresAt: '2025-12-31T23:59:59Z',
+      });
+      // Change from Admin to Moderators
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('announcement');
+      expect(body.item.priority).toBe('high');
+      expect(body.item.expiresAt).toBe('2025-12-31T23:59:59Z');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject announcement creation by regular user', async () => {
+      const event = createMockEvent('POST', {
+        title: 'Unauthorized Announcement',
+        content: 'This should fail',
+        type: 'announcement',
+      });
+      // Regular user (no groups)
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(body.message).toContain('moderators and admins');
+      expect(mockPut).not.toHaveBeenCalled();
+    });
+
+    test('should create task with subtasks and deadline', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Project Task',
+        content: 'Complete the project',
+        type: 'task',
+        deadline: '2025-06-30T17:00:00Z',
+        subtasks: [
+          { id: 'st-1', title: 'Design mockup', completed: false },
+          { id: 'st-2', title: 'Implement feature', completed: false },
+        ],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('task');
+      expect(body.item.status).toBe('active');
+      expect(body.item.deadline).toBe('2025-06-30T17:00:00Z');
+      expect(body.item.subtasks).toHaveLength(2);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('GET /items', () => {

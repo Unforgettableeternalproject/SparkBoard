@@ -9,6 +9,7 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
+const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('../shared/permissions');
 
 // Initialize DynamoDB client
 const client = new DynamoDBClient({});
@@ -20,41 +21,6 @@ const docClient = DynamoDBDocumentClient.from(client, {
 });
 
 const TABLE_NAME = process.env.TABLE_NAME;
-
-/**
- * Helper function to create API response
- */
-function createResponse(statusCode, body) {
-  return {
-    statusCode,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    },
-    body: JSON.stringify(body),
-  };
-}
-
-/**
- * Extract user info from Cognito authorizer
- */
-function getUserFromEvent(event) {
-  const authorizer = event.requestContext?.authorizer;
-  if (!authorizer || !authorizer.claims) {
-    return null;
-  }
-
-  const claims = authorizer.claims;
-  return {
-    userId: claims.sub,
-    username: claims['cognito:username'] || claims.username,
-    email: claims.email,
-    orgId: claims['custom:orgId'] || 'sparkboard-demo',
-    groups: claims['cognito:groups'] ? claims['cognito:groups'].split(',') : [],
-  };
-}
 
 /**
  * POST /items - Create a new item
@@ -83,12 +49,15 @@ async function createItem(event) {
     }
 
     // Validate required fields
-    const { title, content, type, attachments } = body;
+    const { title, content, type, attachments, subtasks, deadline, priority, expiresAt } = body;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return createResponse(400, {
-        error: 'ValidationError',
-        message: 'Title is required and must be a non-empty string',
-      });
+      return createErrorResponse(400, 'ValidationError', 'Title is required and must be a non-empty string');
+    }
+
+    // Check permissions based on type
+    const itemType = type || 'task';
+    if (itemType === 'announcement' && !checkPermission(user, 'create:announcement')) {
+      return createErrorResponse(403, 'Forbidden', 'Only moderators and admins can create announcements');
     }
 
     // Generate IDs and timestamps
@@ -122,13 +91,22 @@ async function createItem(event) {
       
       title: title.trim(),
       content: content?.trim() || '',
-      type: type || 'task', // task, announcement, etc.
-      status: 'active',
+      type: itemType,
       attachments: attachments || [],
       
       createdAt,
       updatedAt: createdAt,
     };
+
+    // Add type-specific fields
+    if (itemType === 'task') {
+      item.status = 'active';
+      item.subtasks = subtasks || [];
+      if (deadline) item.deadline = deadline;
+    } else if (itemType === 'announcement') {
+      item.priority = priority || 'normal';
+      if (expiresAt) item.expiresAt = expiresAt;
+    }
 
     // Save to DynamoDB
     const command = new PutCommand({
@@ -158,6 +136,13 @@ async function createItem(event) {
         attachments: item.attachments,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
+        // Task-specific fields
+        subtasks: item.subtasks,
+        deadline: item.deadline,
+        completedAt: item.completedAt,
+        // Announcement-specific fields
+        priority: item.priority,
+        expiresAt: item.expiresAt,
       },
     });
   } catch (error) {
@@ -243,6 +228,13 @@ async function getItems(event) {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       attachments: item.attachments,
+      // Task-specific fields
+      subtasks: item.subtasks,
+      deadline: item.deadline,
+      completedAt: item.completedAt,
+      // Announcement-specific fields
+      priority: item.priority,
+      expiresAt: item.expiresAt,
     }));
 
     // Generate next token if there are more results
@@ -290,44 +282,33 @@ async function deleteItem(event) {
     // Extract item SK from path parameters
     const sk = event.pathParameters?.sk;
     if (!sk) {
-      return createResponse(400, {
-        error: 'BadRequest',
-        message: 'Item SK is required',
-      });
+      return createErrorResponse(400, 'BadRequest', 'Item SK is required');
     }
 
-    // Check if user is admin
-    const groups = user.groups || [];
-    const isAdmin = groups.includes('Admin');
+    // Query the item to check ownership and type
+    const queryCommand = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND SK = :sk',
+      ExpressionAttributeValues: {
+        ':pk': `ORG#${user.orgId}`,
+        ':sk': sk,
+      },
+    });
 
-    // If not admin, verify the item belongs to the user
-    if (!isAdmin) {
-      // First, query the item to check ownership
-      const queryCommand = new QueryCommand({
-        TableName: TABLE_NAME,
-        KeyConditionExpression: 'PK = :pk AND SK = :sk',
-        ExpressionAttributeValues: {
-          ':pk': `ORG#${user.orgId}`,
-          ':sk': sk,
-        },
-      });
+    const queryResult = await docClient.send(queryCommand);
+    
+    if (!queryResult.Items || queryResult.Items.length === 0) {
+      return createErrorResponse(404, 'NotFound', 'Item not found');
+    }
 
-      const queryResult = await docClient.send(queryCommand);
-      
-      if (!queryResult.Items || queryResult.Items.length === 0) {
-        return createResponse(404, {
-          error: 'NotFound',
-          message: 'Item not found',
-        });
-      }
-
-      const item = queryResult.Items[0];
-      if (item.userId !== user.userId) {
-        return createResponse(403, {
-          error: 'Forbidden',
-          message: 'You do not have permission to delete this item',
-        });
-      }
+    const item = queryResult.Items[0];
+    
+    // Check permissions based on item type and ownership
+    const action = item.type === 'announcement' ? 'delete:announcement' : 'delete:task';
+    const resource = { userId: item.userId };
+    
+    if (!checkPermission(user, action, resource)) {
+      return createErrorResponse(403, 'Forbidden', 'You do not have permission to delete this item');
     }
 
     // Delete the item

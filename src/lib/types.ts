@@ -4,20 +4,52 @@ export interface User {
   name: string
   orgId: string
   'cognito:groups'?: string[]
+  role?: 'Admin' | 'Moderators' | 'Users'
 }
 
-export interface SparkItem {
+export interface SubTask {
+  id: string
+  title: string
+  completed: boolean
+  completedAt?: string
+  completedBy?: string
+}
+
+export interface Task {
   id: string
   pk: string
   sk: string
-  type: 'task' | 'announcement'
+  type: 'task'
   title: string
   content: string
   createdAt: string
+  updatedAt?: string
   userId: string
   userName: string
+  status: 'active' | 'completed'
+  deadline?: string // ISO date string
+  subtasks: SubTask[]
+  completedAt?: string
   attachments?: FileAttachment[]
 }
+
+export interface Announcement {
+  id: string
+  pk: string
+  sk: string
+  type: 'announcement'
+  title: string
+  content: string
+  createdAt: string
+  updatedAt?: string
+  userId: string
+  userName: string
+  priority?: 'normal' | 'high' | 'urgent'
+  expiresAt?: string // ISO date string
+  attachments?: FileAttachment[]
+}
+
+export type SparkItem = Task | Announcement
 
 export interface FileAttachment {
   name: string
@@ -27,9 +59,22 @@ export interface FileAttachment {
   url?: string // S3 presigned URL for downloading
 }
 
-export interface CreateItemInput {
-  type: 'task' | 'announcement'
+export interface CreateTaskInput {
+  type: 'task'
   title: string
   content: string
+  deadline?: string
+  subtasks?: SubTask[]
   attachments?: FileAttachment[]
 }
+
+export interface CreateAnnouncementInput {
+  type: 'announcement'
+  title: string
+  content: string
+  priority?: 'normal' | 'high' | 'urgent'
+  expiresAt?: string
+  attachments?: FileAttachment[]
+}
+
+export type CreateItemInput = CreateTaskInput | CreateAnnouncementInput

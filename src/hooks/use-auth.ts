@@ -21,12 +21,20 @@ function sessionToUser(session: CognitoUserSession, username: string): User {
   const idToken = session.getIdToken()
   const payload = idToken.payload
 
+  const groups = payload['cognito:groups'] || []
+  const role = groups.includes('Admin') 
+    ? 'Admin' 
+    : groups.includes('Moderators') 
+    ? 'Moderators' 
+    : 'Users'
+
   return {
     id: payload.sub,
     email: payload.email || username,
     name: payload.name || payload['cognito:username'] || username,
     orgId: payload['custom:orgId'] || 'ORG#sparkboard-demo',
-    'cognito:groups': payload['cognito:groups'] || [],
+    'cognito:groups': groups,
+    role,
   }
 }
 
@@ -155,12 +163,20 @@ export function useAuth() {
       // Decode ID token to get user info
       const idTokenPayload = JSON.parse(atob(tokens.id_token.split('.')[1]))
       
+      const groups = idTokenPayload['cognito:groups'] || []
+      const role = groups.includes('Admin') 
+        ? 'Admin' 
+        : groups.includes('Moderators') 
+        ? 'Moderators' 
+        : 'Users'
+      
       const user: User = {
         id: idTokenPayload.sub,
         email: idTokenPayload.email,
         name: idTokenPayload.name || idTokenPayload['cognito:username'],
         orgId: idTokenPayload['custom:orgId'] || 'ORG#sparkboard-demo',
-        'cognito:groups': idTokenPayload['cognito:groups'] || [],
+        'cognito:groups': groups,
+        role,
       }
 
       setUser(user)
