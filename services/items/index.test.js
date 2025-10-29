@@ -487,4 +487,196 @@ describe('Items Lambda Handler', () => {
       expect(body.error).toBe('MethodNotAllowed');
     });
   });
+
+  describe('Permission System Tests', () => {
+    test('should allow admin to create announcement', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Admin Announcement',
+        content: 'Important message',
+        type: 'announcement',
+        priority: 'urgent',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Admin';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('announcement');
+      expect(body.item.priority).toBe('urgent');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should allow regular user to create task', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'User Task',
+        content: 'My personal task',
+        type: 'task',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('task');
+      expect(body.item.status).toBe('active');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should delete announcement as moderator', async () => {
+      const event = createMockEvent('DELETE', null, null, { sk: 'ITEM#announcement-123' });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#announcement-123',
+          type: 'announcement',
+          userId: 'other-user-456',
+        }],
+      });
+
+      mockDelete.mockResolvedValue({});
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject regular user deleting other user task', async () => {
+      const event = createMockEvent('DELETE', null, null, { sk: 'ITEM#task-123' });
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'other-user-456',
+        }],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Field Validation Tests', () => {
+    test('should create task with default empty subtasks', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Simple Task',
+        content: 'No subtasks specified',
+        type: 'task',
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.item.subtasks).toEqual([]);
+      expect(body.item.status).toBe('active');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should create announcement with default priority normal', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Normal Announcement',
+        content: 'Regular message',
+        type: 'announcement',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.item.priority).toBe('normal');
+      expect(body.item.type).toBe('announcement');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should return items with new fields in GET response', async () => {
+      const mockItems = [
+        {
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-1',
+          itemId: 'task-1',
+          orgId: 'test-org',
+          userId: 'user-1',
+          username: 'user1',
+          title: 'Task with subtasks',
+          content: 'Test content',
+          type: 'task',
+          status: 'active',
+          subtasks: [{ id: 'st-1', title: 'Subtask 1', completed: false }],
+          deadline: '2025-12-31T23:59:59Z',
+          attachments: [],
+          createdAt: '2025-01-01T00:00:00Z',
+          updatedAt: '2025-01-01T00:00:00Z',
+        },
+        {
+          PK: 'ORG#test-org',
+          SK: 'ITEM#announcement-1',
+          itemId: 'announcement-1',
+          orgId: 'test-org',
+          userId: 'user-2',
+          username: 'user2',
+          title: 'Important announcement',
+          content: 'Urgent message',
+          type: 'announcement',
+          priority: 'high',
+          expiresAt: '2025-06-30T00:00:00Z',
+          attachments: [],
+          createdAt: '2025-01-02T00:00:00Z',
+          updatedAt: '2025-01-02T00:00:00Z',
+        },
+      ];
+
+      mockQuery.mockResolvedValue({
+        Items: mockItems,
+        LastEvaluatedKey: null,
+      });
+
+      const event = createMockEvent('GET');
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.items).toHaveLength(2);
+      
+      // Verify task fields
+      expect(body.items[0].type).toBe('task');
+      expect(body.items[0].subtasks).toHaveLength(1);
+      expect(body.items[0].deadline).toBe('2025-12-31T23:59:59Z');
+      expect(body.items[0].status).toBe('active');
+      
+      // Verify announcement fields
+      expect(body.items[1].type).toBe('announcement');
+      expect(body.items[1].priority).toBe('high');
+      expect(body.items[1].expiresAt).toBe('2025-06-30T00:00:00Z');
+      
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+  });
 });
