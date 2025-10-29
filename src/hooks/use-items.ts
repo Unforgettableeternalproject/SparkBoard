@@ -69,6 +69,12 @@ export function useItems(user: User | null) {
           content: input.content,
           type: input.type,
           attachments: input.attachments,
+          // Task-specific fields
+          subtasks: input.type === 'task' ? input.subtasks : undefined,
+          deadline: input.type === 'task' ? input.deadline : undefined,
+          // Announcement-specific fields
+          priority: input.type === 'announcement' ? input.priority : undefined,
+          expiresAt: input.type === 'announcement' ? input.expiresAt : undefined,
         }),
       })
 
@@ -78,7 +84,7 @@ export function useItems(user: User | null) {
 
       const data = await response.json()
       
-      // Convert API response to SparkItem format
+      // Convert API response to SparkItem format with all fields
       const newItem: SparkItem = {
         id: data.item.id || data.item.itemId,
         pk: data.item.pk || `ORG#${user.orgId}`,
@@ -90,6 +96,18 @@ export function useItems(user: User | null) {
         userId: data.item.userId,
         userName: data.item.userName || data.item.username,
         attachments: data.item.attachments,
+        // Task-specific fields
+        ...(data.item.type === 'task' && {
+          status: data.item.status,
+          subtasks: data.item.subtasks,
+          deadline: data.item.deadline,
+          completedAt: data.item.completedAt,
+        }),
+        // Announcement-specific fields
+        ...(data.item.type === 'announcement' && {
+          priority: data.item.priority,
+          expiresAt: data.item.expiresAt,
+        }),
       }
       
       setItems((current) => [newItem, ...current])
@@ -108,7 +126,10 @@ export function useItems(user: User | null) {
         return
       }
 
-      const response = await fetch(`${API_URL}/items/${itemSk}`, {
+      // Extract just the ID part if SK is in format ITEM#id
+      const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
+
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
         method: 'DELETE',
         headers: {
           'Authorization': idToken,
@@ -127,10 +148,51 @@ export function useItems(user: User | null) {
     }
   }
   
+  const updateItem = async (itemSk: string, updates: Partial<SparkItem>) => {
+    try {
+      const idToken = localStorage.getItem('cognito_id_token')
+      if (!idToken) {
+        toast.error('Authentication required')
+        return
+      }
+
+      // Extract just the ID part if SK is in format ITEM#id
+      const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
+
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': idToken,
+        },
+        body: JSON.stringify(updates),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to update item: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      
+      // Update local state with the updated item
+      setItems((current) =>
+        current.map((item) =>
+          item.sk === itemSk ? { ...item, ...data.item } : item
+        )
+      )
+      
+      toast.success('Item updated successfully')
+    } catch (error) {
+      console.error('Error updating item:', error)
+      toast.error('Failed to update item')
+    }
+  }
+  
   return {
     items,
     isLoading,
     createItem,
-    deleteItem
+    deleteItem,
+    updateItem
   }
 }

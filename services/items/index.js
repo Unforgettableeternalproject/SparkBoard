@@ -9,7 +9,7 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
-const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('../shared/permissions');
+const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('./permissions');
 
 // Initialize DynamoDB client
 const client = new DynamoDBClient({});

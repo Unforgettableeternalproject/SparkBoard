@@ -18,11 +18,22 @@ const MAX_FILES = 5 // Maximum number of files
 
 interface CreateItemDialogProps {
   onCreateItem: (input: CreateItemInput) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  defaultType?: 'task' | 'announcement'
 }
 
-export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
-  const [open, setOpen] = useState(false)
-  const [type, setType] = useState<'task' | 'announcement'>('task')
+export function CreateItemDialog({ 
+  onCreateItem, 
+  open: controlledOpen, 
+  onOpenChange, 
+  defaultType = 'task' 
+}: CreateItemDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen
+  const setOpen = onOpenChange || setInternalOpen
+  
+  const [type, setType] = useState<'task' | 'announcement'>(defaultType)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [attachments, setAttachments] = useState<FileAttachment[]>([])

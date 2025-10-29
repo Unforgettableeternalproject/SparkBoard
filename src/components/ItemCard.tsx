@@ -1,13 +1,18 @@
-import { SparkItem } from '@/lib/types'
+import { useState } from 'react'
+import { SparkItem, User } from '@/lib/types'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle } from '@phosphor-icons/react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
 
 interface ItemCardProps {
   item: SparkItem
+  currentUser: User
+  onDelete?: (itemSk: string) => void
+  onUpdate?: (itemSk: string, updates: Partial<SparkItem>) => void
 }
 
 const isImageType = (type: string) => {
@@ -35,34 +40,80 @@ const getPriorityColor = (priority?: 'normal' | 'high' | 'urgent') => {
   }
 }
 
-export function ItemCard({ item }: ItemCardProps) {
+export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProps) {
   const Icon = item.type === 'task' ? ListChecks : Megaphone
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  
+  // Check if current user can delete this item
+  const canDelete = item.userId === currentUser.sub || 
+                    currentUser['cognito:groups']?.includes('Admin')
+  
+  // Check if current user can edit this item (tasks only, owner or admin)
+  const canEdit = item.type === 'task' && (item.userId === currentUser.sub || 
+                  currentUser['cognito:groups']?.includes('Admin'))
+  
+  // Handle subtask toggle
+  const handleSubtaskToggle = async (subtaskId: string) => {
+    if (!onUpdate || !item.subtasks) return
+    
+    const updatedSubtasks = item.subtasks.map(st => 
+      st.id === subtaskId 
+        ? { ...st, completed: !st.completed, completedAt: !st.completed ? new Date().toISOString() : undefined }
+        : st
+    )
+    
+    await onUpdate(item.sk, { subtasks: updatedSubtasks })
+  }
   
   return (
-    <Card className="transition-all hover:shadow-lg hover:border-primary/20">
+    <Card className="transition-all hover:shadow-lg hover:border-primary/20 flex flex-col">
       <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            <div className="mt-1">
+        <div className="flex items-start justify-between gap-2 sm:gap-4">
+          <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
+            <div className="mt-1 flex-shrink-0">
               <Icon 
                 size={24} 
                 className={item.type === 'task' ? 'text-primary' : 'text-accent'} 
               />
             </div>
             <div className="flex-1 min-w-0">
-              <CardTitle className="text-lg mb-1 truncate">{item.title}</CardTitle>
-              <CardDescription className="text-xs flex items-center gap-2 flex-wrap">
-                <span>{item.userName}</span>
-                <span>•</span>
-                <span>{formatDate(item.createdAt)}</span>
-                <span>•</span>
-                <Badge variant="outline" className="text-xs font-mono">
+              <CardTitle className="text-base sm:text-lg mb-1 break-words">{item.title}</CardTitle>
+              <CardDescription className="text-xs flex items-center gap-1 sm:gap-2 flex-wrap">
+                <span className="truncate max-w-[120px] sm:max-w-none">{item.userName}</span>
+                <span className="hidden sm:inline">•</span>
+                <span className="text-[10px] sm:text-xs">{formatDate(item.createdAt)}</span>
+                <span className="hidden md:inline">•</span>
+                <Badge variant="outline" className="text-[10px] sm:text-xs font-mono hidden md:inline-flex">
                   {item.sk}
                 </Badge>
               </CardDescription>
             </div>
           </div>
-          <div className="flex flex-col gap-2 items-end">
+          <div className="flex flex-col gap-1 sm:gap-2 items-end flex-shrink-0">
+            <div className="flex gap-1">
+              {canEdit && onUpdate && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {/* TODO: Open edit dialog */}}
+                  className="h-7 w-7 text-muted-foreground hover:text-primary"
+                  title="Edit task"
+                >
+                  <PencilSimple size={14} />
+                </Button>
+              )}
+              {canDelete && onDelete && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onDelete(item.sk)}
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  title="Delete item"
+                >
+                  <Trash size={14} />
+                </Button>
+              )}
+            </div>
             <Badge variant={item.type === 'task' ? 'default' : 'secondary'}>
               {item.type}
             </Badge>
@@ -83,7 +134,7 @@ export function ItemCard({ item }: ItemCardProps) {
       {(item.content || (item.attachments && item.attachments.length > 0) || (item.type === 'task' && (item.subtasks?.length || item.deadline)) || (item.type === 'announcement' && item.expiresAt)) && (
         <CardContent className="space-y-3">
           {item.content && (
-            <p className="text-sm text-foreground leading-relaxed">
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
               {item.content}
             </p>
           )}
@@ -119,13 +170,14 @@ export function ItemCard({ item }: ItemCardProps) {
               </p>
               <div className="space-y-1.5">
                 {item.subtasks.map((subtask) => (
-                  <div key={subtask.id} className="flex items-center gap-2 text-sm">
+                  <div key={subtask.id} className="flex items-start gap-2 text-sm">
                     <Checkbox 
                       checked={subtask.completed} 
-                      disabled
-                      className="pointer-events-none"
+                      disabled={!canEdit || !onUpdate}
+                      onCheckedChange={() => handleSubtaskToggle(subtask.id)}
+                      className={`mt-0.5 flex-shrink-0 ${canEdit && onUpdate ? 'cursor-pointer' : 'pointer-events-none'}`}
                     />
-                    <span className={subtask.completed ? 'line-through text-muted-foreground' : ''}>
+                    <span className={`break-words flex-1 ${subtask.completed ? 'line-through text-muted-foreground' : ''}`}>
                       {subtask.title}
                     </span>
                     {subtask.completed && subtask.completedAt && (
@@ -167,13 +219,14 @@ export function ItemCard({ item }: ItemCardProps) {
                         <img
                           src={file.dataUrl || file.url}
                           alt={file.name}
-                          className="max-w-full h-auto rounded-lg border border-border max-h-96 object-contain"
+                          className="max-w-full h-auto rounded-lg border border-border max-h-64 sm:max-h-96 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setImagePreview(file.dataUrl || file.url || null)}
                         />
-                        <div className="flex items-center justify-between px-3 py-2 bg-muted rounded-md">
+                        <div className="flex items-center justify-between px-2 sm:px-3 py-2 bg-muted rounded-md gap-2">
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <ImageIcon size={16} className="text-muted-foreground flex-shrink-0" />
                             <span className="text-xs truncate">{file.name}</span>
-                            <span className="text-xs text-muted-foreground flex-shrink-0">
+                            <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:inline">
                               ({formatFileSize(file.size)})
                             </span>
                           </div>
@@ -231,6 +284,33 @@ export function ItemCard({ item }: ItemCardProps) {
           )}
         </CardContent>
       )}
+      
+      {/* Image Preview Dialog */}
+      <Dialog open={!!imagePreview} onOpenChange={(open) => !open && setImagePreview(null)}>
+        <DialogContent className="max-w-4xl w-full p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Image Preview</DialogTitle>
+            <DialogDescription>Full size image preview</DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-2 right-2 z-10 bg-background/80 hover:bg-background"
+              onClick={() => setImagePreview(null)}
+            >
+              <X size={20} />
+            </Button>
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="w-full h-auto max-h-[90vh] object-contain"
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

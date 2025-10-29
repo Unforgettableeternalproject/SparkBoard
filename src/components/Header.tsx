@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
-import { SignOut, User as UserIcon, ChartBar, Table } from '@phosphor-icons/react'
+import { SignOut, User as UserIcon, ChartBar, Table, ListChecks, MegaphoneSimple } from '@phosphor-icons/react'
 
 interface HeaderProps {
   user: User
@@ -46,7 +46,27 @@ export function Header({ user, onLogout }: HeaderProps) {
               >
                 <Link to="/">
                   <Table className="mr-2" size={16} />
-                  Items
+                  All
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+              >
+                <Link to="/tasks">
+                  <ListChecks className="mr-2" size={16} />
+                  Tasks
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+              >
+                <Link to="/announcements">
+                  <MegaphoneSimple className="mr-2" size={16} />
+                  Announcements
                 </Link>
               </Button>
               {isAdmin && (

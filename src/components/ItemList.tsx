@@ -1,15 +1,17 @@
-import { SparkItem } from '@/lib/types'
+import { SparkItem, User, CreateItemInput } from '@/lib/types'
 import { ItemCard } from './ItemCard'
 import { CreateItemDialog } from './CreateItemDialog'
-import { CreateItemInput } from '@/lib/types'
 import { FileText } from '@phosphor-icons/react'
 
 interface ItemListProps {
   items: SparkItem[]
+  currentUser: User
   onCreateItem: (input: CreateItemInput) => void
+  onDeleteItem: (itemSk: string) => void
+  onUpdateItem: (itemSk: string, updates: Partial<SparkItem>) => void
 }
 
-export function ItemList({ items, onCreateItem }: ItemListProps) {
+export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpdateItem }: ItemListProps) {
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4">
@@ -43,7 +45,13 @@ export function ItemList({ items, onCreateItem }: ItemListProps) {
 
       <div className="grid gap-4">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} />
+          <ItemCard 
+            key={item.id} 
+            item={item} 
+            currentUser={currentUser}
+            onDelete={onDeleteItem}
+            onUpdate={onUpdateItem}
+          />
         ))}
       </div>
     </div>

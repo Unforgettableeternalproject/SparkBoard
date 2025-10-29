@@ -61,7 +61,9 @@ export function AdminItemManagement() {
   // Delete item mutation
   const deleteMutation = useMutation({
     mutationFn: async (item: SparkItem) => {
-      const response = await fetch(`${API_URL}/items/${encodeURIComponent(item.sk)}`, {
+      // Extract just the ID part if SK is in format ITEM#id
+      const skValue = item.sk.startsWith('ITEM#') ? item.sk.substring(5) : item.sk
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
         method: 'DELETE',
         headers: {
           Authorization: idToken || '',

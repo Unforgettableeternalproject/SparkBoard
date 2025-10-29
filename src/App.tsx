@@ -6,12 +6,15 @@ import { LoginForm } from './components/LoginForm'
 import { Header } from './components/Header'
 import { ItemList } from './components/ItemList'
 import { AdminDashboard } from './pages/AdminDashboard'
+import { TasksPage } from './pages/TasksPage'
+import { AnnouncementsPage } from './pages/AnnouncementsPage'
+import { AnnouncementBanner } from './components/AnnouncementBanner'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 
 function App() {
   const { user, isAuthenticated, isLoading, login, logout, loginWithHostedUI, handleOAuthCallback } = useAuth()
-  const { items, createItem } = useItems(user)
+  const { items, createItem, deleteItem, updateItem } = useItems(user)
 
   // Handle OAuth callback on mount
   useEffect(() => {
@@ -55,9 +58,12 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-background">
         <Header user={user!} onLogout={logout} />
+        <AnnouncementBanner announcements={items || []} />
         <main className="container mx-auto px-4 py-8">
           <Routes>
-            <Route path="/" element={<ItemList items={items || []} onCreateItem={createItem} />} />
+            <Route path="/" element={<ItemList items={items || []} currentUser={user!} onCreateItem={createItem} onDeleteItem={deleteItem} onUpdateItem={updateItem} />} />
+            <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/announcements" element={<AnnouncementsPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
