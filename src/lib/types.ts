@@ -3,6 +3,7 @@ export interface User {
   email: string
   name: string
   orgId: string
+  'cognito:groups'?: string[]
 }
 
 export interface SparkItem {
@@ -23,6 +24,7 @@ export interface FileAttachment {
   size: number
   type: string
   dataUrl?: string
+  url?: string // S3 presigned URL for downloading
 }
 
 export interface CreateItemInput {

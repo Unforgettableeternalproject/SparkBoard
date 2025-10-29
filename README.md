@@ -259,17 +259,55 @@ API Gateway → Lambda → DynamoDB
 
 ## 🚀 CI/CD Pipeline
 
-### GitHub Actions
+SparkBoard 使用 GitHub Actions 實現完整的 CI/CD 自動化部署流程。
 
-1. **CI** (`.github/workflows/ci.yml`)
-   - Lint 檢查
-   - 單元測試
-   - TypeScript 編譯
+### 🔄 工作流程
 
-2. **CD** (`.github/workflows/cdk-deploy.yml`)
-   - CDK Synth
-   - CDK Diff
-   - 自動部署至 AWS
+```
+Feature Branch → Development → Main → AWS Deployment
+     ↓              ↓           ↓          ↓
+  CI Checks    Auto-Merge   Trigger    Auto Deploy
+```
+
+### 📋 GitHub Actions Workflows
+
+| Workflow | 觸發條件 | 功能 |
+|----------|---------|------|
+| **Feature CI** | Push to `feature/**` | 程式碼品質檢查、測試、安全掃描 |
+| **CI Checks** | PR/Push to `development`/`main` | 完整測試套件 |
+| **Merge to Main** | Push to `development` | 自動合併到 main 分支 |
+| **CDK Deploy** | Push to `main` | 🚀 自動部署到 AWS |
+
+### 🔐 安全部署
+
+使用 **AWS OIDC** 進行無憑證部署：
+- ✅ 無需在 GitHub 儲存 AWS Access Keys
+- ✅ 短期臨時憑證，自動輪換
+- ✅ 精確的權限控制
+- ✅ 審計追蹤
+
+### 📚 部署文檔
+
+詳細設置步驟請參考：
+- [CI/CD 部署指南](./docs/CICD_DEPLOYMENT_GUIDE.md) - 完整使用指南
+- [AWS OIDC 設置](./docs/AWS_OIDC_SETUP.md) - OIDC 配置教學
+
+### 🚀 快速開始
+
+```bash
+# 1. 設置 AWS OIDC（首次）
+chmod +x scripts/setup-aws-oidc.sh
+./scripts/setup-aws-oidc.sh
+
+# 2. CDK Bootstrap（首次）
+cdk bootstrap aws://YOUR_ACCOUNT_ID/us-east-1
+
+# 3. 正常開發流程
+git checkout -b feature/my-feature
+git commit -m "feat: add new feature"
+git push origin feature/my-feature
+# → 創建 PR → 合併到 development → 自動部署 ✅
+```
 
 ## 📝 開發指令
 

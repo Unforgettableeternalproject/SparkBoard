@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/use-auth'
 import { useItems } from './hooks/use-items'
 import { LoginForm } from './components/LoginForm'
 import { Header } from './components/Header'
 import { ItemList } from './components/ItemList'
+import { AdminDashboard } from './pages/AdminDashboard'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 
@@ -50,13 +52,19 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header user={user!} onLogout={logout} />
-      <main className="container mx-auto px-4 py-8">
-        <ItemList items={items || []} onCreateItem={createItem} />
-      </main>
-      <Toaster />
-    </div>
+    <BrowserRouter>
+      <div className="min-h-screen bg-background">
+        <Header user={user!} onLogout={logout} />
+        <main className="container mx-auto px-4 py-8">
+          <Routes>
+            <Route path="/" element={<ItemList items={items || []} onCreateItem={createItem} />} />
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+        <Toaster />
+      </div>
+    </BrowserRouter>
   )
 }
 

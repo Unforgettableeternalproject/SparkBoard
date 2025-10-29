@@ -6,6 +6,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as path from 'path';
 
 interface ApiStackProps extends cdk.StackProps {
@@ -21,6 +22,8 @@ export class ApiStack extends cdk.Stack {
   public readonly authFunction: lambda.Function;
   public readonly itemsFunction: lambda.Function;
   public readonly uploadsFunction: lambda.Function;
+  public readonly monitoringFunction: lambda.Function;
+  public readonly lambdaFunctions: lambda.Function[];
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -45,6 +48,7 @@ export class ApiStack extends cdk.Stack {
         NODE_ENV: 'production',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
     // Auth Me Lambda Function
@@ -61,6 +65,7 @@ export class ApiStack extends cdk.Stack {
         NODE_ENV: 'production',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
     // Items Lambda Function
@@ -76,6 +81,7 @@ export class ApiStack extends cdk.Stack {
         NODE_ENV: 'production',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
     // Uploads Lambda Function
@@ -88,11 +94,37 @@ export class ApiStack extends cdk.Stack {
       memorySize: 256,
       environment: {
         BUCKET_NAME: bucket.bucketName,
-        AWS_REGION: this.region,
         NODE_ENV: 'production',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
+
+    // Monitoring Lambda Function (for admin dashboard)
+    this.monitoringFunction = new lambda.Function(this, 'MonitoringFunction', {
+      functionName: 'SparkBoard-Monitoring',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/monitoring')),
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        TABLE_NAME: table.tableName,
+        API_ID: '', // Will be set after API creation
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Collect all functions for monitoring
+    this.lambdaFunctions = [
+      this.healthFunction,
+      this.authFunction,
+      this.itemsFunction,
+      this.uploadsFunction,
+      this.monitoringFunction,
+    ];
 
     // Grant permissions
     table.grantReadData(this.healthFunction); // Health check only reads
@@ -110,6 +142,7 @@ export class ApiStack extends cdk.Stack {
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
         dataTraceEnabled: true,
         metricsEnabled: true,
+        tracingEnabled: true, // Enable X-Ray for API Gateway
       },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS, // Update with your frontend domain
@@ -192,6 +225,19 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // DELETE /items/{sk} (requires Cognito JWT)
+    const itemBySkResource = itemsResource.addResource('{sk}');
+    itemBySkResource.addMethod(
+      'DELETE',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
     // Uploads endpoints - /uploads/*
     const uploadsResource = this.api.root.addResource('uploads');
     
@@ -206,6 +252,92 @@ export class ApiStack extends cdk.Stack {
         authorizationType: apigateway.AuthorizationType.COGNITO,
         authorizer: cognitoAuthorizer,
       }
+    );
+
+    // Monitoring endpoints - /monitoring/* (Admin only)
+    const monitoringResource = this.api.root.addResource('monitoring');
+    
+    // GET /monitoring/metrics (requires Cognito JWT + Admin role)
+    const metricsResource = monitoringResource.addResource('metrics');
+    metricsResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(this.monitoringFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // GET /monitoring/traces (requires Cognito JWT + Admin role)
+    const tracesResource = monitoringResource.addResource('traces');
+    tracesResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(this.monitoringFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // GET /monitoring/alarms (requires Cognito JWT + Admin role)
+    const alarmsResource = monitoringResource.addResource('alarms');
+    alarmsResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(this.monitoringFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // Update monitoring function environment with API ID
+    this.monitoringFunction.addEnvironment('API_ID', this.api.restApiId);
+
+    // Grant CloudWatch permissions to monitoring function
+    this.monitoringFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'cloudwatch:GetMetricStatistics',
+          'cloudwatch:DescribeAlarms',
+          'cloudwatch:ListMetrics',
+        ],
+        resources: ['*'],
+      })
+    );
+
+    // Grant X-Ray permissions to monitoring function
+    this.monitoringFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'xray:GetTraceSummaries',
+          'xray:BatchGetTraces',
+          'xray:GetServiceGraph',
+        ],
+        resources: ['*'],
+      })
+    );
+
+    // Grant Logs permissions to monitoring function
+    this.monitoringFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'logs:FilterLogEvents',
+          'logs:GetLogEvents',
+          'logs:DescribeLogStreams',
+        ],
+        resources: [
+          `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/SparkBoard-*`,
+        ],
+      })
     );
 
     // Outputs

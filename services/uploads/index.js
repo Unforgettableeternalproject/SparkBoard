@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'ap-northeast-1',
+  region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-northeast-1',
 });
 
 const getBucketName = () => process.env.BUCKET_NAME;

@@ -10,6 +10,11 @@ import { CreateItemInput, FileAttachment } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatFileSize } from '@/lib/helpers'
 
+// File upload limits
+const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB per file
+const MAX_TOTAL_SIZE = 10 * 1024 * 1024 // 10MB total
+const MAX_FILES = 5 // Maximum number of files
+
 interface CreateItemDialogProps {
   onCreateItem: (input: CreateItemInput) => void
 }
@@ -25,9 +30,26 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
     const files = e.target.files
     if (!files) return
 
-    Array.from(files).forEach((file) => {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 5MB)`)
+    // Check total number of files
+    if (attachments.length + files.length > MAX_FILES) {
+      toast.error(`Maximum ${MAX_FILES} files allowed`)
+      return
+    }
+
+    const fileArray = Array.from(files)
+    const currentTotalSize = attachments.reduce((sum, file) => sum + file.size, 0)
+    const newTotalSize = fileArray.reduce((sum, file) => sum + file.size, 0)
+
+    // Check total size
+    if (currentTotalSize + newTotalSize > MAX_TOTAL_SIZE) {
+      toast.error(`Total file size exceeds ${formatFileSize(MAX_TOTAL_SIZE)} limit`)
+      return
+    }
+
+    fileArray.forEach((file) => {
+      // Check individual file size
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`${file.name} exceeds ${formatFileSize(MAX_FILE_SIZE)} limit`)
         return
       }
 
@@ -45,6 +67,9 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
       }
       reader.readAsDataURL(file)
     })
+
+    // Clear input to allow re-uploading same file
+    e.target.value = ''
   }
 
   const removeAttachment = (index: number) => {
@@ -130,16 +155,28 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>Attachments (S3 Upload Simulation)</Label>
+            <div className="flex items-center justify-between">
+              <Label>Attachments</Label>
+              <p className="text-xs text-muted-foreground">
+                Max {MAX_FILES} files, {formatFileSize(MAX_FILE_SIZE)} each, {formatFileSize(MAX_TOTAL_SIZE)} total
+              </p>
+            </div>
             <div className="space-y-2">
               <Input
                 type="file"
                 multiple
                 onChange={handleFileUpload}
                 className="cursor-pointer"
+                disabled={attachments.length >= MAX_FILES}
               />
               {attachments.length > 0 && (
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground px-2">
+                    <span>{attachments.length} / {MAX_FILES} files</span>
+                    <span>
+                      {formatFileSize(attachments.reduce((sum, f) => sum + f.size, 0))} / {formatFileSize(MAX_TOTAL_SIZE)}
+                    </span>
+                  </div>
                   {attachments.map((file, index) => (
                     <div
                       key={index}
