@@ -5,8 +5,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Plus, File, X } from '@phosphor-icons/react'
-import { CreateItemInput, FileAttachment } from '@/lib/types'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Plus, File, X, CalendarBlank, ListChecks } from '@phosphor-icons/react'
+import { CreateItemInput, FileAttachment, SubTask } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatFileSize } from '@/lib/helpers'
 
@@ -25,6 +26,15 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
+  
+  // Task-specific fields
+  const [deadline, setDeadline] = useState('')
+  const [subtasks, setSubtasks] = useState<SubTask[]>([])
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+  
+  // Announcement-specific fields
+  const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>('normal')
+  const [expiresAt, setExpiresAt] = useState('')
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -76,22 +86,59 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const addSubtask = () => {
+    if (!newSubtaskTitle.trim()) {
+      toast.error('Subtask title is required')
+      return
+    }
+    const newSubtask: SubTask = {
+      id: `st-${Date.now()}`,
+      title: newSubtaskTitle.trim(),
+      completed: false
+    }
+    setSubtasks((prev) => [...prev, newSubtask])
+    setNewSubtaskTitle('')
+  }
+
+  const removeSubtask = (index: number) => {
+    setSubtasks((prev) => prev.filter((_, i) => i !== index))
+  }
+
   const handleSubmit = () => {
     if (!title.trim()) {
       toast.error('Title is required')
       return
     }
 
-    onCreateItem({
-      type,
-      title: title.trim(),
-      content: content.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined
-    })
+    if (type === 'task') {
+      onCreateItem({
+        type: 'task',
+        title: title.trim(),
+        content: content.trim(),
+        deadline: deadline || undefined,
+        subtasks: subtasks.length > 0 ? subtasks : undefined,
+        attachments: attachments.length > 0 ? attachments : undefined
+      })
+    } else {
+      onCreateItem({
+        type: 'announcement',
+        title: title.trim(),
+        content: content.trim(),
+        priority,
+        expiresAt: expiresAt || undefined,
+        attachments: attachments.length > 0 ? attachments : undefined
+      })
+    }
 
+    // Reset form
     setTitle('')
     setContent('')
     setAttachments([])
+    setDeadline('')
+    setSubtasks([])
+    setNewSubtaskTitle('')
+    setPriority('normal')
+    setExpiresAt('')
     setOpen(false)
     toast.success(`${type === 'task' ? 'Task' : 'Announcement'} created`)
   }
@@ -153,6 +200,99 @@ export function CreateItemDialog({ onCreateItem }: CreateItemDialogProps) {
               rows={5}
             />
           </div>
+
+          {/* Task-specific fields */}
+          {type === 'task' && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="deadline" className="flex items-center gap-2">
+                  <CalendarBlank size={16} />
+                  Deadline (optional)
+                </Label>
+                <Input
+                  id="deadline"
+                  type="datetime-local"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <ListChecks size={16} />
+                  Subtasks (optional)
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add a subtask..."
+                    value={newSubtaskTitle}
+                    onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        addSubtask()
+                      }
+                    }}
+                  />
+                  <Button type="button" onClick={addSubtask} size="icon">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                {subtasks.length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {subtasks.map((subtask, index) => (
+                      <div
+                        key={subtask.id}
+                        className="flex items-center gap-2 p-2 bg-muted rounded-md"
+                      >
+                        <span className="text-sm flex-1">{subtask.title}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeSubtask(index)}
+                        >
+                          <X size={16} />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Announcement-specific fields */}
+          {type === 'announcement' && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="priority">Priority</Label>
+                <Select value={priority} onValueChange={(value: 'normal' | 'high' | 'urgent') => setPriority(value)}>
+                  <SelectTrigger id="priority">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="expiresAt" className="flex items-center gap-2">
+                  <CalendarBlank size={16} />
+                  Expires At (optional)
+                </Label>
+                <Input
+                  id="expiresAt"
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                />
+              </div>
+            </>
+          )}
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
