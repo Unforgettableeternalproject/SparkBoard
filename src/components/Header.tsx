@@ -1,6 +1,7 @@
 import { User } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import LogoImage from '@/assets/Logo.png'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -58,7 +59,14 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-semibold tracking-tight">SparkBoard</h1>
+            <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity group">
+              <img 
+                src={LogoImage} 
+                alt="SparkBoard Logo" 
+                className="h-8 w-8 object-contain transition-transform group-hover:scale-110"
+              />
+              <h1 className="text-2xl font-semibold tracking-tight">SparkBoard</h1>
+            </Link>
             <Badge variant="secondary" className="font-mono text-xs">
               {user.orgId}
             </Badge>

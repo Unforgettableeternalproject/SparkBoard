@@ -211,6 +211,7 @@ export function TasksPage() {
         onOpenChange={setIsCreateDialogOpen}
         onCreateItem={handleCreateItem}
         defaultType="task"
+        userGroups={user?.['cognito:groups'] || []}
       />
     </div>
   )

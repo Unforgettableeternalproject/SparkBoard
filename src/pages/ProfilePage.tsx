@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -26,19 +26,34 @@ import { formatDate } from '@/lib/helpers'
 import { toast } from 'sonner'
 
 export function ProfilePage() {
-  const { user } = useAuth()
+  const { user, idToken } = useAuth()
   const { items } = useItems(user)
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [bio, setBio] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined)
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
+  const API_URL = import.meta.env.VITE_API_URL
 
   useEffect(() => {
     if (user) {
       setName(user.name)
+      setEmail(user.email)
       // Bio would come from user profile API in the future
       setBio('')
     }
   }, [user])
+
+  // Debug: Log authentication state
+  useEffect(() => {
+    console.log('[ProfilePage] Auth state:', {
+      hasUser: !!user,
+      hasToken: !!idToken,
+      tokenLength: idToken?.length,
+      apiUrl: API_URL
+    })
+  }, [user, idToken, API_URL])
 
   // Calculate user statistics
   const stats = useMemo(() => {
@@ -78,16 +93,211 @@ export function ProfilePage() {
     }
   }, [user, items])
 
-  const handleSave = () => {
-    // TODO: Implement profile update API
-    toast.success('Profile updated (API integration pending)')
-    setIsEditing(false)
+  // Load user profile from backend
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user || !idToken || !API_URL) return
+
+      try {
+        const response = await fetch(`${API_URL}/auth/me`, {
+          method: 'GET',
+          headers: {
+            'Authorization': idToken,
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log('[ProfilePage] Loaded profile:', data)
+          if (data.user) {
+            if (data.user.name) setName(data.user.name)
+            if (data.user.email) setEmail(data.user.email)
+            setBio(data.user.bio || '')
+            setAvatarUrl(data.user.avatarUrl)
+          }
+        }
+      } catch (error) {
+        console.error('[ProfilePage] Failed to load profile:', error)
+      }
+    }
+
+    loadProfile()
+  }, [user, idToken, API_URL])
+
+  const saveProfileToBackend = async (updates: { name?: string; email?: string; bio?: string; avatarUrl?: string }) => {
+    if (!API_URL || !idToken) {
+      throw new Error('API URL or token not available')
+    }
+
+    console.log('[ProfilePage] Saving profile updates:', updates)
+
+    const response = await fetch(`${API_URL}/auth/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': idToken,
+      },
+      body: JSON.stringify(updates),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('[ProfilePage] Failed to save profile:', response.status, errorText)
+      throw new Error(`Failed to save profile: ${response.status}`)
+    }
+
+    const data = await response.json()
+    console.log('[ProfilePage] Profile saved:', data)
+    return data
+  }
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+
+    // Validate file size (max 5MB)
+    const MAX_SIZE = 5 * 1024 * 1024
+    if (file.size > MAX_SIZE) {
+      toast.error('Image size must be less than 5MB')
+      return
+    }
+
+    // Check if API URL is configured
+    if (!API_URL) {
+      console.error('[ProfilePage] API_URL not configured')
+      toast.error('API URL not configured. Please check environment variables.')
+      return
+    }
+
+    // Check if user is authenticated
+    if (!idToken) {
+      console.error('[ProfilePage] No authentication token available')
+      toast.error('Please log in again to upload avatar')
+      return
+    }
+
+    setIsUploadingAvatar(true)
+
+    try {
+      console.log('[ProfilePage] Requesting presigned URL for:', file.name)
+      
+      // Step 1: Get presigned URL
+      const presignResponse = await fetch(`${API_URL}/uploads/presign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': idToken,
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
+        }),
+      })
+
+      if (!presignResponse.ok) {
+        const errorText = await presignResponse.text()
+        console.error('[ProfilePage] Presign failed:', presignResponse.status, errorText)
+        throw new Error(`Failed to get upload URL: ${presignResponse.status} ${errorText}`)
+      }
+
+      const presignData = await presignResponse.json()
+      console.log('[ProfilePage] Presigned URL received:', presignData)
+
+      if (!presignData.upload || !presignData.upload.url) {
+        throw new Error('Invalid presign response: missing upload URL')
+      }
+
+      const { upload } = presignData
+
+      // Step 2: Upload file to S3
+      console.log('[ProfilePage] Uploading to S3:', upload.url)
+      const uploadResponse = await fetch(upload.url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      })
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text()
+        console.error('[ProfilePage] S3 upload failed:', uploadResponse.status, errorText)
+        throw new Error(`Failed to upload file to S3: ${uploadResponse.status}`)
+      }
+
+      // Step 3: Generate public URL (construct from bucket and key)
+      const awsRegion = import.meta.env.VITE_AWS_REGION || 'ap-northeast-1'
+      const publicUrl = `https://${upload.bucket}.s3.${awsRegion}.amazonaws.com/${upload.key}`
+      
+      console.log('[ProfilePage] Upload successful, public URL:', publicUrl)
+      setAvatarUrl(publicUrl)
+      
+      // Save avatar URL to user profile in backend
+      await saveProfileToBackend({ avatarUrl: publicUrl })
+      
+      toast.success('Avatar uploaded and saved successfully!')
+    } catch (error) {
+      console.error('[ProfilePage] Avatar upload error:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload avatar'
+      toast.error(errorMessage)
+    } finally {
+      setIsUploadingAvatar(false)
+    }
+  }
+
+  const handleSave = async () => {
+    try {
+      // Validate name and email
+      if (!name.trim()) {
+        toast.error('Name cannot be empty')
+        return
+      }
+      if (!email.trim()) {
+        toast.error('Email cannot be empty')
+        return
+      }
+      
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      if (!emailRegex.test(email)) {
+        toast.error('Please enter a valid email address')
+        return
+      }
+
+      // Save name, email, bio and avatar to backend
+      const result = await saveProfileToBackend({ 
+        name: name.trim(),
+        email: email.trim(),
+        bio: bio.trim(),
+        ...(avatarUrl && { avatarUrl })
+      })
+      
+      // Show warning if email verification is needed
+      if (result.warning) {
+        toast.warning(result.warning)
+      } else {
+        toast.success('Profile updated successfully!')
+      }
+      
+      setIsEditing(false)
+    } catch (error) {
+      console.error('[ProfilePage] Failed to save profile:', error)
+      toast.error('Failed to save profile changes')
+    }
   }
 
   const handleCancel = () => {
     if (user) {
       setName(user.name)
-      setBio('')
+      setEmail(user.email)
+      // Reload bio and avatar from current state
     }
     setIsEditing(false)
   }
@@ -113,6 +323,7 @@ export function ProfilePage() {
     .slice(0, 2)
 
   const userRole = user['cognito:groups']?.[0] || 'Users'
+  const canCreateAnnouncement = user['cognito:groups']?.includes('Admin') || user['cognito:groups']?.includes('Moderators')
   const joinedDate = new Date(user.id).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
@@ -145,19 +356,35 @@ export function ProfilePage() {
             <div className="flex flex-col items-center space-y-4">
               <div className="relative group">
                 <Avatar className="h-24 w-24">
+                  {avatarUrl && <AvatarImage src={avatarUrl} alt={user.name} />}
                   <AvatarFallback className="text-2xl bg-primary text-primary-foreground">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
                 {isEditing && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="absolute bottom-0 right-0 h-8 w-8 rounded-full p-0 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => toast.info('Avatar upload coming soon!')}
-                  >
-                    <PencilSimple size={14} />
-                  </Button>
+                  <>
+                    <input
+                      type="file"
+                      id="avatar-upload"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                      disabled={isUploadingAvatar}
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="absolute bottom-0 right-0 h-8 w-8 rounded-full p-0 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => document.getElementById('avatar-upload')?.click()}
+                      disabled={isUploadingAvatar}
+                    >
+                      {isUploadingAvatar ? (
+                        <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                      ) : (
+                        <PencilSimple size={14} />
+                      )}
+                    </Button>
+                  </>
                 )}
               </div>
               <div className="text-center">
@@ -180,7 +407,22 @@ export function ProfilePage() {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Your name"
+                      required
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="your.email@example.com"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Changing your email will require verification
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="bio">Bio</Label>
@@ -190,7 +432,11 @@ export function ProfilePage() {
                       onChange={(e) => setBio(e.target.value)}
                       placeholder="Tell us about yourself..."
                       rows={4}
+                      maxLength={500}
                     />
+                    <p className="text-xs text-muted-foreground text-right">
+                      {bio.length}/500 characters
+                    </p>
                   </div>
                 </>
               ) : (
@@ -199,7 +445,7 @@ export function ProfilePage() {
                     <UserIcon size={20} className="text-muted-foreground" weight="duotone" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-muted-foreground">Name</p>
-                      <p className="font-medium truncate">{user.name}</p>
+                      <p className="font-medium truncate">{name}</p>
                     </div>
                   </div>
 
@@ -207,7 +453,7 @@ export function ProfilePage() {
                     <Envelope size={20} className="text-muted-foreground" weight="duotone" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-muted-foreground">Email</p>
-                      <p className="font-medium truncate">{user.email}</p>
+                      <p className="font-medium truncate">{email}</p>
                     </div>
                   </div>
 
@@ -299,19 +545,21 @@ export function ProfilePage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>
-                  <div className="flex items-center gap-1">
-                    <MegaphoneSimple size={14} />
-                    <span>Announcements</span>
-                  </div>
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.announcementsCreated}</div>
-              </CardContent>
-            </Card>
+            {canCreateAnnouncement && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>
+                    <div className="flex items-center gap-1">
+                      <MegaphoneSimple size={14} />
+                      <span>Announcements</span>
+                    </div>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.announcementsCreated}</div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Recent Activity */}
@@ -322,10 +570,10 @@ export function ProfilePage() {
             </CardHeader>
             <CardContent>
               <Tabs defaultValue="all" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className={`grid w-full ${canCreateAnnouncement ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   <TabsTrigger value="all">All</TabsTrigger>
                   <TabsTrigger value="tasks">Tasks</TabsTrigger>
-                  <TabsTrigger value="announcements">Announcements</TabsTrigger>
+                  {canCreateAnnouncement && <TabsTrigger value="announcements">Announcements</TabsTrigger>}
                 </TabsList>
 
                 <TabsContent value="all" className="space-y-4 mt-4">
@@ -384,7 +632,8 @@ export function ProfilePage() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="announcements" className="space-y-4 mt-4">
+                {canCreateAnnouncement && (
+                  <TabsContent value="announcements" className="space-y-4 mt-4">
                   {items
                     .filter(item => item.userId === user.id && item.type === 'announcement')
                     .slice(0, 5)
@@ -415,7 +664,8 @@ export function ProfilePage() {
                   {items.filter(item => item.userId === user.id && item.type === 'announcement').length === 0 && (
                     <p className="text-center text-muted-foreground py-8">No announcements yet</p>
                   )}
-                </TabsContent>
+                  </TabsContent>
+                )}
               </Tabs>
             </CardContent>
           </Card>

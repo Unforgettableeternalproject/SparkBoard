@@ -49,7 +49,7 @@ async function createItem(event) {
     }
 
     // Validate required fields
-    const { title, content, type, attachments, subtasks, deadline, priority, expiresAt } = body;
+    const { title, content, type, attachments, subtasks, deadline, priority, expiresAt, isPinned, pinnedUntil } = body;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return createErrorResponse(400, 'ValidationError', 'Title is required and must be a non-empty string');
     }
@@ -106,6 +106,8 @@ async function createItem(event) {
     } else if (itemType === 'announcement') {
       item.priority = priority || 'normal';
       if (expiresAt) item.expiresAt = expiresAt;
+      if (isPinned !== undefined) item.isPinned = isPinned;
+      if (pinnedUntil) item.pinnedUntil = pinnedUntil;
     }
 
     // Save to DynamoDB
@@ -143,6 +145,8 @@ async function createItem(event) {
         // Announcement-specific fields
         priority: item.priority,
         expiresAt: item.expiresAt,
+        isPinned: item.isPinned,
+        pinnedUntil: item.pinnedUntil,
       },
     });
   } catch (error) {
@@ -442,6 +446,37 @@ async function updateItem(event) {
         updateExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'deadline';
         expressionAttributeValues[`:val${counter}`] = body.deadline;
+      }
+    }
+
+    // Update announcement-specific fields
+    if (item.type === 'announcement') {
+      if (body.priority !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'priority';
+        expressionAttributeValues[`:val${counter}`] = body.priority;
+      }
+
+      if (body.expiresAt !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'expiresAt';
+        expressionAttributeValues[`:val${counter}`] = body.expiresAt;
+      }
+
+      if (body.isPinned !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'isPinned';
+        expressionAttributeValues[`:val${counter}`] = body.isPinned;
+      }
+
+      if (body.pinnedUntil !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'pinnedUntil';
+        expressionAttributeValues[`:val${counter}`] = body.pinnedUntil;
       }
     }
 

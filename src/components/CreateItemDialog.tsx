@@ -6,7 +6,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, File, X, CalendarBlank, ListChecks } from '@phosphor-icons/react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Plus, File, X, CalendarBlank, ListChecks, PushPin } from '@phosphor-icons/react'
 import { CreateItemInput, FileAttachment, SubTask } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatFileSize } from '@/lib/helpers'
@@ -21,18 +22,21 @@ interface CreateItemDialogProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   defaultType?: 'task' | 'announcement'
+  userGroups?: string[]
 }
 
 export function CreateItemDialog({ 
   onCreateItem, 
   open: controlledOpen, 
   onOpenChange, 
-  defaultType = 'task' 
+  defaultType = 'task',
+  userGroups = []
 }: CreateItemDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = onOpenChange || setInternalOpen
   
+  const canCreateAnnouncement = userGroups.includes('Admin') || userGroups.includes('Moderators')
   const [type, setType] = useState<'task' | 'announcement'>(defaultType)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -46,6 +50,8 @@ export function CreateItemDialog({
   // Announcement-specific fields
   const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>('normal')
   const [expiresAt, setExpiresAt] = useState('')
+  const [isPinned, setIsPinned] = useState(false)
+  const [pinnedUntil, setPinnedUntil] = useState('')
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -137,6 +143,8 @@ export function CreateItemDialog({
         content: content.trim(),
         priority,
         expiresAt: expiresAt || undefined,
+        isPinned,
+        pinnedUntil: pinnedUntil || undefined,
         attachments: attachments.length > 0 ? attachments : undefined
       })
     }
@@ -150,6 +158,8 @@ export function CreateItemDialog({
     setNewSubtaskTitle('')
     setPriority('normal')
     setExpiresAt('')
+    setIsPinned(false)
+    setPinnedUntil('')
     setOpen(false)
     toast.success(`${type === 'task' ? 'Task' : 'Announcement'} created`)
   }
@@ -181,13 +191,15 @@ export function CreateItemDialog({
               >
                 Task
               </Badge>
-              <Badge
-                variant={type === 'announcement' ? 'default' : 'outline'}
-                className="cursor-pointer px-4 py-2"
-                onClick={() => setType('announcement')}
-              >
-                Announcement
-              </Badge>
+              {canCreateAnnouncement && (
+                <Badge
+                  variant={type === 'announcement' ? 'default' : 'outline'}
+                  className="cursor-pointer px-4 py-2"
+                  onClick={() => setType('announcement')}
+                >
+                  Announcement
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -302,6 +314,38 @@ export function CreateItemDialog({
                   onChange={(e) => setExpiresAt(e.target.value)}
                 />
               </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="isPinned"
+                    checked={isPinned}
+                    onCheckedChange={(checked) => setIsPinned(checked as boolean)}
+                  />
+                  <Label htmlFor="isPinned" className="flex items-center gap-2 cursor-pointer">
+                    <PushPin size={16} weight="duotone" />
+                    Pin this announcement to top banner
+                  </Label>
+                </div>
+              </div>
+
+              {isPinned && (
+                <div className="space-y-2">
+                  <Label htmlFor="pinnedUntil" className="flex items-center gap-2">
+                    <CalendarBlank size={16} />
+                    Auto-unpin after (optional)
+                  </Label>
+                  <Input
+                    id="pinnedUntil"
+                    type="datetime-local"
+                    value={pinnedUntil}
+                    onChange={(e) => setPinnedUntil(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to pin indefinitely. Announcement will automatically unpin after this date.
+                  </p>
+                </div>
+              )}
             </>
           )}
 

@@ -133,6 +133,16 @@ export class ApiStack extends cdk.Stack {
     bucket.grantPut(this.uploadsFunction); // Uploads can generate presigned PUT URLs
     bucket.grantRead(this.uploadsFunction); // Uploads can also read for validation
 
+    // Grant Cognito permissions to auth function for updating user attributes
+    this.authFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cognito-idp:AdminUpdateUserAttributes',
+        'cognito-idp:AdminGetUser',
+      ],
+      resources: [userPool.userPoolArn],
+    }));
+
     // API Gateway REST API
     this.api = new apigateway.RestApi(this, 'SparkBoardApi', {
       restApiName: 'SparkBoard API',
@@ -189,6 +199,18 @@ export class ApiStack extends cdk.Stack {
     const authMeResource = authResource.addResource('me');
     authMeResource.addMethod(
       'GET',
+      new apigateway.LambdaIntegration(this.authFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // PATCH /auth/me (requires Cognito JWT) - Update user profile
+    authMeResource.addMethod(
+      'PATCH',
       new apigateway.LambdaIntegration(this.authFunction, {
         proxy: true,
       }),

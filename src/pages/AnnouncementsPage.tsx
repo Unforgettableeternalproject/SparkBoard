@@ -58,6 +58,9 @@ export function AnnouncementsPage() {
     (group) => group === 'Admin' || group === 'Moderators'
   )
 
+  // Check if user can edit/delete announcements
+  const canManageAnnouncements = canCreateAnnouncement
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -92,13 +95,14 @@ export function AnnouncementsPage() {
           <h2 className="text-xl font-semibold">Active Announcements</h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {activeAnnouncements.map((announcement) => (
-              <ItemCard
-                key={announcement.sk}
-                item={announcement}
-                currentUser={user!}
-                onDelete={handleDeleteItem}
-                onUpdate={updateItem}
-              />
+              <div key={announcement.sk} data-announcement-id={announcement.sk}>
+                <ItemCard
+                  item={announcement}
+                  currentUser={user!}
+                  onDelete={canManageAnnouncements ? handleDeleteItem : undefined}
+                  onUpdate={canManageAnnouncements ? updateItem : undefined}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -112,13 +116,14 @@ export function AnnouncementsPage() {
           </h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 opacity-60">
             {expiredAnnouncements.map((announcement) => (
-              <ItemCard
-                key={announcement.sk}
-                item={announcement}
-                currentUser={user!}
-                onDelete={handleDeleteItem}
-                onUpdate={updateItem}
-              />
+              <div key={announcement.sk} data-announcement-id={announcement.sk}>
+                <ItemCard
+                  item={announcement}
+                  currentUser={user!}
+                  onDelete={canManageAnnouncements ? handleDeleteItem : undefined}
+                  onUpdate={canManageAnnouncements ? updateItem : undefined}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -128,7 +133,7 @@ export function AnnouncementsPage() {
       {activeAnnouncements.length === 0 && expiredAnnouncements.length === 0 && (
         <div className="text-center py-12 border-2 border-dashed rounded-lg">
           <MegaphoneSimple size={48} className="mx-auto mb-4 text-muted-foreground" />
-          <p className="text-muted-foreground">No announcements yet</p>
+          <p className="text-muted-foreground">No announcements available</p>
           {canCreateAnnouncement && (
             <p className="text-sm text-muted-foreground mt-1">
               Create a new announcement to get started
@@ -143,6 +148,7 @@ export function AnnouncementsPage() {
           onOpenChange={setIsCreateDialogOpen}
           onCreateItem={handleCreateItem}
           defaultType="announcement"
+          userGroups={user?.['cognito:groups'] || []}
         />
       )}
     </div>

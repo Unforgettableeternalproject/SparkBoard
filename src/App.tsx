@@ -10,7 +10,7 @@ import { AdminDashboard } from './pages/AdminDashboard'
 import { TasksPage } from './pages/TasksPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
 import { ProfilePage } from './pages/ProfilePage'
-import { AnnouncementBanner } from './components/AnnouncementBanner'
+import { PinnedAnnouncementBanner } from './components/PinnedAnnouncementBanner'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 
@@ -60,7 +60,7 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-background flex flex-col">
         <Header user={user!} onLogout={logout} items={items || []} />
-        <AnnouncementBanner announcements={items || []} />
+        <PinnedAnnouncementBanner announcements={items || []} />
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar - Hidden on mobile, visible on desktop */}
           <div className="hidden lg:block w-64 border-r bg-card/50 overflow-y-auto">

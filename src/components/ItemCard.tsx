@@ -9,6 +9,7 @@ import { EditItemDialog } from '@/components/EditItemDialog'
 import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface ItemCardProps {
   item: SparkItem
@@ -46,15 +47,20 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   const Icon = item.type === 'task' ? ListChecks : Megaphone
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   
   // Check if current user can delete this item
   const canDelete = item.userId === currentUser.sub || 
                     currentUser['cognito:groups']?.includes('Admin')
   
-  // Check if current user can edit this item (tasks only, owner or admin)
-  const canEdit = item.type === 'task' && (item.userId === currentUser.sub || 
-                  currentUser['cognito:groups']?.includes('Admin'))
+  // Check if current user can edit this item
+  // Tasks: owner or admin
+  // Announcements: moderator or admin
+  const canEdit = onUpdate && (
+    (item.type === 'task' && (item.userId === currentUser.sub || currentUser['cognito:groups']?.includes('Admin'))) ||
+    (item.type === 'announcement' && (currentUser['cognito:groups']?.includes('Admin') || currentUser['cognito:groups']?.includes('Moderators')))
+  )
   
   // ✨ Enhanced subtask toggle with loading state and visual feedback
   const handleSubtaskToggle = async (subtaskId: string) => {
@@ -91,11 +97,24 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   }
   
   return (
-    <Card className={cn(
-      "smooth-transition hover-lift flex flex-col animate-slide-in-up",
-      isUpdating && "opacity-60 pointer-events-none"
-    )}>
-      <CardHeader>
+    <Card 
+      className={cn(
+        "smooth-transition hover-lift flex flex-col animate-slide-in-up",
+        isUpdating && "opacity-60 pointer-events-none"
+      )}
+    >
+      <CardHeader 
+        className={cn(item.type === 'announcement' && "cursor-pointer")}
+        onClick={(e) => {
+          if (item.type === 'announcement') {
+            // Only trigger if not clicking on buttons or badges
+            const target = e.target as HTMLElement
+            if (!target.closest('button') && !target.closest('[role="button"]')) {
+              setViewDialogOpen(true)
+            }
+          }
+        }}
+      >
         <div className="flex items-start justify-between gap-2 sm:gap-4">
           <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
             <div className="mt-1 flex-shrink-0 transition-transform duration-200 hover:scale-110">
@@ -109,33 +128,43 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
               />
             </div>
             <div className="flex-1 min-w-0">
-              <CardTitle className="text-base sm:text-lg mb-1.5 break-words font-semibold">{item.title}</CardTitle>
+              <CardTitle className="text-base sm:text-lg mb-1.5 break-words overflow-wrap-anywhere font-semibold">{item.title}</CardTitle>
               <div className="flex flex-col gap-1 text-xs">
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <span className="truncate max-w-[120px] sm:max-w-[200px] font-medium text-muted-foreground">{item.userName}</span>
+                <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                  <span className="truncate max-w-[100px] xs:max-w-[120px] sm:max-w-[200px] font-medium text-muted-foreground">{item.userName}</span>
                   <span className="text-muted-foreground shrink-0">•</span>
                   <time dateTime={item.createdAt} className="text-[10px] sm:text-xs text-muted-foreground shrink-0">{formatDate(item.createdAt)}</time>
                 </div>
                 <Badge 
                   variant="outline" 
-                  className="text-[10px] font-mono w-fit max-w-full"
-                  title={item.sk}
+                  className="text-[10px] font-mono w-fit cursor-pointer hover:bg-accent transition-colors group relative"
+                  title={`${item.sk} (Click to copy)`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigator.clipboard.writeText(item.sk)
+                    toast.success('ID copied to clipboard!')
+                  }}
                 >
-                  <span className="truncate block">{item.sk}</span>
+                  <span className="block max-w-[120px] sm:max-w-[150px] truncate group-hover:max-w-none">
+                    {item.sk.length > 20 ? `${item.sk.slice(0, 20)}...` : item.sk}
+                  </span>
                 </Badge>
               </div>
             </div>
           </div>
           <div className="flex flex-col gap-1 sm:gap-2 items-end flex-shrink-0">
             <div className="flex gap-1">
-              {canEdit && onUpdate && (
+              {canEdit && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setEditDialogOpen(true)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditDialogOpen(true)
+                  }}
                   disabled={isUpdating}
                   className="h-7 w-7 text-muted-foreground hover:text-primary smooth-transition hover:scale-110"
-                  title="Edit task"
+                  title={`Edit ${item.type}`}
                 >
                   <PencilSimple size={14} weight="duotone" />
                 </Button>
@@ -144,7 +173,8 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     if (window.confirm(`Are you sure you want to delete "${item.title}"?`)) {
                       onDelete(item.sk)
                     }
@@ -175,9 +205,19 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
       </CardHeader>
       
       {(item.content || (item.attachments && item.attachments.length > 0) || (item.type === 'task' && (item.subtasks?.length || item.deadline)) || (item.type === 'announcement' && item.expiresAt)) && (
-        <CardContent className="space-y-3">
+        <CardContent 
+          className={cn("space-y-3", item.type === 'announcement' && "cursor-pointer")}
+          onClick={(e) => {
+            if (item.type === 'announcement') {
+              const target = e.target as HTMLElement
+              if (!target.closest('button') && !target.closest('[role="button"]') && !target.closest('a')) {
+                setViewDialogOpen(true)
+              }
+            }
+          }}
+        >
           {item.content && (
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">
+            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words overflow-wrap-anywhere">
               {item.content}
             </p>
           )}
@@ -385,15 +425,97 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
       </Dialog>
 
       {/* Edit Dialog */}
-      {canEdit && onUpdate && (
+      {canEdit && (
         <EditItemDialog
           item={item}
           open={editDialogOpen}
           onOpenChange={setEditDialogOpen}
           onSave={async (itemSk, updates) => {
-            await onUpdate(itemSk, updates)
+            await onUpdate!(itemSk, updates)
           }}
         />
+      )}
+
+      {/* View Announcement Dialog */}
+      {item.type === 'announcement' && (
+        <Dialog open={viewDialogOpen} onOpenChange={(open) => setViewDialogOpen(open)}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <Megaphone size={24} weight="duotone" className="text-secondary" />
+                <DialogTitle>{item.title}</DialogTitle>
+              </div>
+              <DialogDescription className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm">By {item.userName}</span>
+                  <span>•</span>
+                  <time className="text-sm">{formatDate(item.createdAt)}</time>
+                  {item.priority && (
+                    <>
+                      <span>•</span>
+                      <Badge variant={getPriorityColor(item.priority)}>{item.priority}</Badge>
+                    </>
+                  )}
+                </div>
+                {item.expiresAt && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <CalendarBlank size={16} />
+                    <span>Expires: {formatDate(item.expiresAt)}</span>
+                  </div>
+                )}
+                {item.isPinned && (
+                  <div className="flex items-center gap-2 text-sm text-primary">
+                    <Note size={16} weight="fill" />
+                    <span>Pinned announcement</span>
+                    {item.pinnedUntil && <span>until {formatDate(item.pinnedUntil)}</span>}
+                  </div>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {item.content && (
+                <p className="text-sm whitespace-pre-wrap break-words">{item.content}</p>
+              )}
+              {item.attachments && item.attachments.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <File size={16} />
+                    Attachments ({item.attachments.length})
+                  </h4>
+                  <div className="grid gap-2">
+                    {item.attachments.map((file, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded border bg-card">
+                        {isImageType(file.type) ? (
+                          <ImageIcon size={16} className="text-muted-foreground" />
+                        ) : (
+                          <File size={16} className="text-muted-foreground" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate">{file.name}</p>
+                          <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            if (isImageType(file.type)) {
+                              setImagePreview(file.url)
+                            } else {
+                              window.open(file.url, '_blank')
+                            }
+                          }}
+                          className="h-8 w-8"
+                        >
+                          <DownloadSimple size={16} />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </Card>
   )

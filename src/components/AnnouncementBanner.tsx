@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { SparkItem } from '@/lib/types'
+import { SparkItem, Announcement } from '@/lib/types'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { X, MegaphoneSimple, Warning, Info } from '@phosphor-icons/react'
+import { X, MegaphoneSimple, Warning, Info, PushPin } from '@phosphor-icons/react'
 import { formatDate } from '@/lib/helpers'
 
 interface AnnouncementBannerProps {
@@ -14,6 +14,7 @@ interface AnnouncementBannerProps {
 export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<SparkItem | null>(null)
+  const [currentIndex, setCurrentIndex] = useState(0)
 
   // Load dismissed announcements from localStorage on mount
   useEffect(() => {
@@ -27,10 +28,17 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
     }
   }, [])
 
-  // Get the latest high/urgent priority announcement that hasn't been dismissed
-  const latestImportantAnnouncement = announcements
-    .filter((item) => item.type === 'announcement')
-    .filter((item) => item.priority === 'high' || item.priority === 'urgent')
+  // Get pinned announcements that are still valid
+  const pinnedAnnouncements = announcements
+    .filter((item): item is Announcement => item.type === 'announcement')
+    .filter((item) => item.isPinned)
+    .filter((item) => {
+      // Filter out if pinnedUntil has passed
+      if (item.pinnedUntil) {
+        return new Date(item.pinnedUntil) > new Date()
+      }
+      return true
+    })
     .filter((item) => {
       // Filter out expired announcements
       if (item.expiresAt) {
@@ -40,16 +48,34 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
     })
     .filter((item) => !dismissedIds.has(item.sk))
     .sort((a, b) => {
-      // Sort by priority (urgent > high) then by creation date
+      // Sort by priority (urgent > high > normal) then by creation date
       const priorityOrder = { urgent: 0, high: 1, normal: 2 }
       const priorityA = a.priority || 'normal'
       const priorityB = b.priority || 'normal'
       const priorityDiff = priorityOrder[priorityA] - priorityOrder[priorityB]
       if (priorityDiff !== 0) return priorityDiff
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })[0]
+    })
 
-  if (!latestImportantAnnouncement) {
+  // Rotate through pinned announcements every 5 seconds
+  useEffect(() => {
+    if (pinnedAnnouncements.length <= 1) return
+
+    const interval = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % pinnedAnnouncements.length)
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [pinnedAnnouncements.length])
+
+  // Reset index when announcements change
+  useEffect(() => {
+    setCurrentIndex(0)
+  }, [pinnedAnnouncements.length])
+
+  const currentAnnouncement = pinnedAnnouncements[currentIndex]
+
+  if (!currentAnnouncement) {
     return null
   }
 
@@ -70,49 +96,67 @@ export function AnnouncementBanner({ announcements }: AnnouncementBannerProps) {
     setSelectedAnnouncement(announcement)
   }
 
-  const isUrgent = latestImportantAnnouncement.priority === 'urgent'
+  const isUrgent = currentAnnouncement.priority === 'urgent'
   const Icon = isUrgent ? Warning : Info
 
   return (
     <>
-      <div className="border-b bg-muted/30">
-        <div className="container mx-auto px-4 py-3">
+      <div className="border-b bg-muted/30 animate-fade-in">
+        <div className="container mx-auto px-4 py-2.5">
           <Alert 
             variant={isUrgent ? 'destructive' : 'default'}
-            className="relative pr-12"
+            className="relative pr-12 py-3"
           >
             <Icon className="h-4 w-4" />
-            <AlertTitle className="flex items-center gap-2">
-              <MegaphoneSimple size={16} weight="fill" />
-              {latestImportantAnnouncement.title}
-              <Badge 
-                variant={isUrgent ? 'destructive' : 'default'} 
-                className="ml-2 text-xs"
-              >
-                {latestImportantAnnouncement.priority}
-              </Badge>
+            <AlertTitle className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <PushPin size={16} weight="fill" className="text-primary" />
+                <MegaphoneSimple size={16} weight="fill" />
+                <span className="font-semibold">{currentAnnouncement.title}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {currentAnnouncement.priority && (
+                  <Badge 
+                    variant={isUrgent ? 'destructive' : currentAnnouncement.priority === 'high' ? 'default' : 'secondary'} 
+                    className="text-xs"
+                  >
+                    {currentAnnouncement.priority}
+                  </Badge>
+                )}
+                {pinnedAnnouncements.length > 1 && (
+                  <Badge variant="outline" className="text-xs">
+                    {currentIndex + 1} / {pinnedAnnouncements.length}
+                  </Badge>
+                )}
+              </div>
             </AlertTitle>
             <AlertDescription className="mt-2">
-              <p className="line-clamp-2">{latestImportantAnnouncement.content}</p>
-              <div className="flex items-center gap-4 mt-2">
+              <p className="line-clamp-1 text-sm">{currentAnnouncement.content}</p>
+              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                 <Button
                   variant="link"
                   size="sm"
-                  onClick={() => handleOpenDetails(latestImportantAnnouncement)}
+                  onClick={() => handleOpenDetails(currentAnnouncement)}
                   className="h-auto p-0 text-xs"
                 >
-                  View full announcement
+                  View details
                 </Button>
-                <span className="text-xs text-muted-foreground">
-                  Posted by {latestImportantAnnouncement.userName} • {formatDate(latestImportantAnnouncement.createdAt)}
+                <span>
+                  Posted by {currentAnnouncement.userName} • {formatDate(currentAnnouncement.createdAt)}
                 </span>
+                {currentAnnouncement.pinnedUntil && (
+                  <span>
+                    • Pinned until {formatDate(currentAnnouncement.pinnedUntil)}
+                  </span>
+                )}
               </div>
             </AlertDescription>
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => handleDismiss(latestImportantAnnouncement.sk)}
+              onClick={() => handleDismiss(currentAnnouncement.sk)}
               className="absolute right-2 top-2 h-6 w-6 rounded-full"
+              title="Dismiss"
             >
               <X size={14} />
             </Button>

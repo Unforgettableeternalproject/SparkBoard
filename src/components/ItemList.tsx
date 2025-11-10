@@ -25,7 +25,7 @@ export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpd
           <p className="text-sm text-muted-foreground">
             Create your first task or announcement to get started with SparkBoard
           </p>
-          <CreateItemDialog onCreateItem={onCreateItem} />
+          <CreateItemDialog onCreateItem={onCreateItem} userGroups={currentUser?.['cognito:groups'] || []} />
         </div>
       </div>
     )
@@ -40,7 +40,7 @@ export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpd
             {items.length} {items.length === 1 ? 'item' : 'items'} in your organization
           </p>
         </div>
-        <CreateItemDialog onCreateItem={onCreateItem} />
+        <CreateItemDialog onCreateItem={onCreateItem} userGroups={currentUser?.['cognito:groups'] || []} />
       </div>
 
       <div className="grid gap-4">

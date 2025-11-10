@@ -5,7 +5,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { CalendarBlank, ListChecks, Plus, X, CheckCircle } from '@phosphor-icons/react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { CalendarBlank, ListChecks, Plus, X, CheckCircle, PushPin } from '@phosphor-icons/react'
 import { SparkItem, SubTask } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/helpers'
@@ -25,6 +27,14 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
+  // Announcement-specific fields
+  const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>(
+    item.type === 'announcement' ? (item.priority as 'normal' | 'high' | 'urgent' || 'normal') : 'normal'
+  )
+  const [expiresAt, setExpiresAt] = useState(item.type === 'announcement' ? item.expiresAt || '' : '')
+  const [isPinned, setIsPinned] = useState(item.type === 'announcement' ? item.isPinned || false : false)
+  const [pinnedUntil, setPinnedUntil] = useState(item.type === 'announcement' ? item.pinnedUntil || '' : '')
+
   // Reset form when item changes or dialog opens
   useEffect(() => {
     if (open) {
@@ -33,6 +43,13 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
       setDeadline(item.type === 'task' ? item.deadline || '' : '')
       setSubtasks(item.type === 'task' ? item.subtasks || [] : [])
       setNewSubtaskTitle('')
+      
+      if (item.type === 'announcement') {
+        setPriority((item.priority as 'normal' | 'high' | 'urgent') || 'normal')
+        setExpiresAt(item.expiresAt || '')
+        setIsPinned(item.isPinned || false)
+        setPinnedUntil(item.pinnedUntil || '')
+      }
     }
   }, [open, item])
 
@@ -72,19 +89,27 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
 
     setIsSaving(true)
     try {
-      const updates: Partial<SparkItem> = {
+      const updates: any = {
         title: title.trim(),
         content: content.trim(),
-        deadline: deadline || undefined,
-        subtasks: subtasks.length > 0 ? subtasks : undefined,
       }
 
-      await onSave(item.sk, updates)
-      toast.success('Task updated successfully')
+      if (item.type === 'task') {
+        updates.deadline = deadline || undefined
+        updates.subtasks = subtasks.length > 0 ? subtasks : undefined
+      } else if (item.type === 'announcement') {
+        updates.priority = priority
+        updates.expiresAt = expiresAt || undefined
+        updates.isPinned = isPinned
+        updates.pinnedUntil = pinnedUntil || undefined
+      }
+
+      await onSave(item.sk, updates as Partial<SparkItem>)
+      toast.success(item.type === 'task' ? 'Task updated successfully' : 'Announcement updated successfully')
       onOpenChange(false)
     } catch (error) {
-      console.error('Error updating task:', error)
-      toast.error('Failed to update task')
+      console.error(`Error updating ${item.type}:`, error)
+      toast.error(`Failed to update ${item.type}`)
     } finally {
       setIsSaving(false)
     }
@@ -94,9 +119,9 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Task</DialogTitle>
+          <DialogTitle>Edit {item.type === 'task' ? 'Task' : 'Announcement'}</DialogTitle>
           <DialogDescription>
-            Update the task details below
+            Update the {item.type === 'task' ? 'task' : 'announcement'} details below
           </DialogDescription>
         </DialogHeader>
 
@@ -110,7 +135,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
               id="edit-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Enter task title"
+              placeholder={`Enter ${item.type} title`}
               maxLength={200}
             />
           </div>
@@ -122,28 +147,31 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
               id="edit-content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Enter task description"
+              placeholder={`Enter ${item.type} description`}
               rows={4}
               maxLength={2000}
             />
           </div>
 
-          {/* Deadline */}
-          <div className="space-y-2">
-            <Label htmlFor="edit-deadline" className="flex items-center gap-2">
-              <CalendarBlank size={16} />
-              Deadline
-            </Label>
-            <Input
-              id="edit-deadline"
-              type="datetime-local"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-            />
-          </div>
+          {/* Task-specific fields */}
+          {item.type === 'task' && (
+            <>
+              {/* Deadline */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-deadline" className="flex items-center gap-2">
+                  <CalendarBlank size={16} />
+                  Deadline
+                </Label>
+                <Input
+                  id="edit-deadline"
+                  type="datetime-local"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                />
+              </div>
 
-          {/* Subtasks */}
-          <div className="space-y-2">
+              {/* Subtasks */}
+              <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <ListChecks size={16} />
               Subtasks {subtasks.length > 0 && (
@@ -214,6 +242,72 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
               </Button>
             </div>
           </div>
+            </>
+          )}
+
+          {/* Announcement-specific fields */}
+          {item.type === 'announcement' && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="edit-priority">Priority</Label>
+                <Select value={priority} onValueChange={(value: 'normal' | 'high' | 'urgent') => setPriority(value)}>
+                  <SelectTrigger id="edit-priority">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-expiresAt" className="flex items-center gap-2">
+                  <CalendarBlank size={16} />
+                  Expires At (optional)
+                </Label>
+                <Input
+                  id="edit-expiresAt"
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(e) => setExpiresAt(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="edit-isPinned"
+                    checked={isPinned}
+                    onCheckedChange={(checked) => setIsPinned(checked as boolean)}
+                  />
+                  <Label htmlFor="edit-isPinned" className="flex items-center gap-2 cursor-pointer">
+                    <PushPin size={16} weight="duotone" />
+                    Pin this announcement to top banner
+                  </Label>
+                </div>
+              </div>
+
+              {isPinned && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-pinnedUntil" className="flex items-center gap-2">
+                    <CalendarBlank size={16} />
+                    Auto-unpin after (optional)
+                  </Label>
+                  <Input
+                    id="edit-pinnedUntil"
+                    type="datetime-local"
+                    value={pinnedUntil}
+                    onChange={(e) => setPinnedUntil(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to pin indefinitely. Announcement will automatically unpin after this date.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <DialogFooter>

@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/hooks/use-auth'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Shield, ChartBar, Table } from '@phosphor-icons/react'
+import { Shield, ChartBar, Table, Users } from '@phosphor-icons/react'
 import { MonitoringDashboard } from './MonitoringDashboard'
 import { AdminItemManagement } from '@/components/AdminItemManagement'
+import { UserManagement } from '@/components/UserManagement'
 
 export function AdminDashboard() {
   const { user } = useAuth()
@@ -60,6 +61,10 @@ export function AdminDashboard() {
             <Table className="mr-2" size={16} />
             Item Management
           </TabsTrigger>
+          <TabsTrigger value="users">
+            <Users className="mr-2" size={16} />
+            User Management
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="monitoring">
@@ -68,6 +73,10 @@ export function AdminDashboard() {
 
         <TabsContent value="items">
           <AdminItemManagement />
+        </TabsContent>
+
+        <TabsContent value="users">
+          <UserManagement />
         </TabsContent>
       </Tabs>
     </div>

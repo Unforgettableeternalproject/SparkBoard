@@ -71,6 +71,8 @@ export interface Announcement {
   userName: string
   priority?: 'normal' | 'high' | 'urgent'
   expiresAt?: string // ISO date string
+  isPinned?: boolean
+  pinnedUntil?: string // ISO date string - auto unpin after this date
   attachments?: FileAttachment[]
   annotations?: Annotation[]
 }
@@ -100,6 +102,8 @@ export interface CreateAnnouncementInput {
   content: string
   priority?: 'normal' | 'high' | 'urgent'
   expiresAt?: string
+  isPinned?: boolean
+  pinnedUntil?: string
   attachments?: FileAttachment[]
 }
 
