@@ -35,9 +35,10 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
   const [isPinned, setIsPinned] = useState(item.type === 'announcement' ? item.isPinned || false : false)
   const [pinnedUntil, setPinnedUntil] = useState(item.type === 'announcement' ? item.pinnedUntil || '' : '')
 
-  // Reset form when item changes or dialog opens
+  // Reset form ONLY when dialog opens (not when item changes during editing)
   useEffect(() => {
     if (open) {
+      console.log('EditItemDialog - Opening with item:', item)
       setTitle(item.title)
       setContent(item.content || '')
       setDeadline(item.type === 'task' ? item.deadline || '' : '')
@@ -45,13 +46,21 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
       setNewSubtaskTitle('')
       
       if (item.type === 'announcement') {
+        console.log('EditItemDialog - Setting announcement fields:', {
+          priority: item.priority,
+          expiresAt: item.expiresAt,
+          isPinned: item.isPinned,
+          pinnedUntil: item.pinnedUntil
+        })
         setPriority((item.priority as 'normal' | 'high' | 'urgent') || 'normal')
         setExpiresAt(item.expiresAt || '')
         setIsPinned(item.isPinned || false)
         setPinnedUntil(item.pinnedUntil || '')
       }
     }
-  }, [open, item])
+    // Only depend on 'open' - don't reset when item changes during editing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const addSubtask = () => {
     if (!newSubtaskTitle.trim()) {
@@ -85,6 +94,19 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
     if (!title.trim()) {
       toast.error('Title is required')
       return
+    }
+
+    // Validate dates for announcements
+    if (item.type === 'announcement') {
+      // Check if isPinned and pinnedUntil is set
+      if (isPinned && pinnedUntil && expiresAt) {
+        const pinnedDate = new Date(pinnedUntil)
+        const expiresDate = new Date(expiresAt)
+        if (pinnedDate >= expiresDate) {
+          toast.error('Pin until date must be earlier than expiration date')
+          return
+        }
+      }
     }
 
     setIsSaving(true)
@@ -167,6 +189,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                   type="datetime-local"
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
                 />
               </div>
 
@@ -272,6 +295,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                   type="datetime-local"
                   value={expiresAt}
                   onChange={(e) => setExpiresAt(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
                 />
               </div>
 
@@ -280,12 +304,21 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                   <Checkbox 
                     id="edit-isPinned"
                     checked={isPinned}
-                    onCheckedChange={(checked) => setIsPinned(checked as boolean)}
+                    onCheckedChange={(checked) => {
+                      console.log('[EditItemDialog] Pin checkbox onCheckedChange:', checked, 'current isPinned:', isPinned)
+                      setIsPinned(checked as boolean)
+                    }}
                   />
-                  <Label htmlFor="edit-isPinned" className="flex items-center gap-2 cursor-pointer">
+                  <span 
+                    className="flex items-center gap-2 text-sm font-medium leading-none cursor-pointer select-none"
+                    onClick={() => {
+                      console.log('[EditItemDialog] Span clicked, toggling isPinned from', isPinned, 'to', !isPinned)
+                      setIsPinned(!isPinned)
+                    }}
+                  >
                     <PushPin size={16} weight="duotone" />
                     Pin this announcement to top banner
-                  </Label>
+                  </span>
                 </div>
               </div>
 
@@ -300,6 +333,8 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                     type="datetime-local"
                     value={pinnedUntil}
                     onChange={(e) => setPinnedUntil(e.target.value)}
+                    min={new Date().toISOString().slice(0, 16)}
+                    max={expiresAt || undefined}
                   />
                   <p className="text-xs text-muted-foreground">
                     Leave empty to pin indefinitely. Announcement will automatically unpin after this date.

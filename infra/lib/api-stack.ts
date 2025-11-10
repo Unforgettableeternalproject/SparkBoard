@@ -117,6 +117,35 @@ export class ApiStack extends cdk.Stack {
       tracing: lambda.Tracing.ACTIVE,
     });
 
+    // Users Lambda Function (for admin user management)
+    const usersFunction = new lambda.Function(this, 'UsersFunction', {
+      functionName: 'SparkBoard-Users',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/users')),
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+      environment: {
+        USER_POOL_ID: userPool.userPoolId,
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Grant Cognito permissions to users function
+    usersFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cognito-idp:ListUsers',
+        'cognito-idp:AdminListGroupsForUser',
+        'cognito-idp:AdminAddUserToGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminGetUser',
+      ],
+      resources: [userPool.userPoolArn],
+    }));
+
     // Collect all functions for monitoring
     this.lambdaFunctions = [
       this.healthFunction,
@@ -124,6 +153,7 @@ export class ApiStack extends cdk.Stack {
       this.itemsFunction,
       this.uploadsFunction,
       this.monitoringFunction,
+      usersFunction,
     ];
 
     // Grant permissions
@@ -322,6 +352,47 @@ export class ApiStack extends cdk.Stack {
     alarmsResource.addMethod(
       'GET',
       new apigateway.LambdaIntegration(this.monitoringFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // Users endpoints - /users/* (Admin only)
+    const usersResource = this.api.root.addResource('users');
+    
+    // GET /users (requires Cognito JWT + Admin role)
+    usersResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/add-to-group (requires Cognito JWT + Admin role)
+    const addToGroupResource = usersResource.addResource('add-to-group');
+    addToGroupResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/remove-from-group (requires Cognito JWT + Admin role)
+    const removeFromGroupResource = usersResource.addResource('remove-from-group');
+    removeFromGroupResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
         proxy: true,
       }),
       {

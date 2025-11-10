@@ -51,15 +51,26 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   const [isUpdating, setIsUpdating] = useState(false)
   
   // Check if current user can delete this item
+  // Tasks: owner, moderators, or admin can delete
+  // Announcements: moderators or admin can delete
   const canDelete = item.userId === currentUser.sub || 
-                    currentUser['cognito:groups']?.includes('Admin')
+                    currentUser['cognito:groups']?.includes('Admin') ||
+                    currentUser['cognito:groups']?.includes('Moderators')
   
   // Check if current user can edit this item
-  // Tasks: owner or admin
-  // Announcements: moderator or admin
+  // Tasks: owner, moderators, or admin can edit
+  // Announcements: moderators or admin can edit
   const canEdit = onUpdate && (
-    (item.type === 'task' && (item.userId === currentUser.sub || currentUser['cognito:groups']?.includes('Admin'))) ||
-    (item.type === 'announcement' && (currentUser['cognito:groups']?.includes('Admin') || currentUser['cognito:groups']?.includes('Moderators')))
+    (item.type === 'task' && (
+      item.userId === currentUser.sub || 
+      item.userId === currentUser.id || 
+      currentUser['cognito:groups']?.includes('Admin') ||
+      currentUser['cognito:groups']?.includes('Moderators')
+    )) ||
+    (item.type === 'announcement' && (
+      currentUser['cognito:groups']?.includes('Admin') || 
+      currentUser['cognito:groups']?.includes('Moderators')
+    ))
   )
   
   // ✨ Enhanced subtask toggle with loading state and visual feedback

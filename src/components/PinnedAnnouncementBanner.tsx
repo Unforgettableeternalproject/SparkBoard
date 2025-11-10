@@ -1,19 +1,19 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { SparkItem, Announcement } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PushPin, X } from '@phosphor-icons/react'
 import { formatDate } from '@/lib/helpers'
-import { cn } from '@/lib/utils'
+import { ItemDetailDialog } from '@/components/ItemDetailDialog'
 
 interface PinnedAnnouncementBannerProps {
   announcements: SparkItem[]
 }
 
 export function PinnedAnnouncementBanner({ announcements }: PinnedAnnouncementBannerProps) {
-  const navigate = useNavigate()
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [viewDialogOpen, setViewDialogOpen] = useState(false)
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
     const stored = localStorage.getItem('dismissedPinnedAnnouncements')
     return stored ? new Set(JSON.parse(stored)) : new Set()
@@ -84,13 +84,8 @@ export function PinnedAnnouncementBanner({ announcements }: PinnedAnnouncementBa
   }
 
   const handleClick = (announcement: Announcement) => {
-    // Navigate to announcements page with the specific announcement in view
-    navigate('/announcements')
-    // Scroll to the announcement after navigation (small delay to ensure page is loaded)
-    setTimeout(() => {
-      const element = document.querySelector(`[data-announcement-id="${announcement.sk}"]`)
-      element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 100)
+    setSelectedAnnouncement(announcement)
+    setViewDialogOpen(true)
   }
 
   if (pinnedAnnouncements.length === 0) {
@@ -113,55 +108,66 @@ export function PinnedAnnouncementBanner({ announcements }: PinnedAnnouncementBa
   }
 
   return (
-    <div className="border-b bg-card/50 animate-fade-in">
-      <div className="container mx-auto px-4">
-        <div 
-          className="relative w-full border rounded-none py-2.5 px-4 cursor-pointer hover:bg-accent/50 transition-colors bg-card"
-          onClick={() => handleClick(currentAnnouncement)}
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <PushPin size={16} weight="fill" className="text-primary flex-shrink-0" />
-              
-              <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
-                <Badge variant={getPriorityColor(currentAnnouncement.priority)} className="flex-shrink-0">
-                  {currentAnnouncement.priority || 'normal'}
-                </Badge>
+    <>
+      <div className="border-b bg-card/50 animate-fade-in">
+        <div className="container mx-auto px-4">
+          <div 
+            className="relative w-full border rounded-none py-2.5 px-4 cursor-pointer hover:bg-accent/50 transition-colors bg-card"
+            onClick={() => handleClick(currentAnnouncement)}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <PushPin size={16} weight="fill" className="text-primary flex-shrink-0" />
                 
-                <span className="font-medium truncate flex-1 min-w-0 text-sm">
-                  {currentAnnouncement.title}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
-                {currentAnnouncement.pinnedUntil && (
-                  <span className="hidden sm:inline">
-                    Until {formatDate(currentAnnouncement.pinnedUntil)}
-                  </span>
-                )}
-                
-                {pinnedAnnouncements.length > 1 && (
-                  <Badge variant="outline" className="text-xs">
-                    {currentIndex + 1} / {pinnedAnnouncements.length}
+                <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                  <Badge variant={getPriorityColor(currentAnnouncement.priority)} className="flex-shrink-0">
+                    {currentAnnouncement.priority || 'normal'}
                   </Badge>
-                )}
-              </div>
-            </div>
+                  
+                  <span className="font-medium truncate flex-1 min-w-0 text-sm">
+                    {currentAnnouncement.title}
+                  </span>
+                </div>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 flex-shrink-0"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleDismiss(currentAnnouncement.sk)
-              }}
-            >
-              <X size={14} />
-            </Button>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
+                  {currentAnnouncement.pinnedUntil && (
+                    <span className="hidden sm:inline">
+                      Until {formatDate(currentAnnouncement.pinnedUntil)}
+                    </span>
+                  )}
+                  
+                  {pinnedAnnouncements.length > 1 && (
+                    <Badge variant="outline" className="text-xs">
+                      {currentIndex + 1} / {pinnedAnnouncements.length}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 flex-shrink-0"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDismiss(currentAnnouncement.sk)
+                }}
+              >
+                <X size={14} />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* View Announcement Dialog - copied from ItemCard */}
+      {selectedAnnouncement && (
+        <ItemDetailDialog
+          announcement={selectedAnnouncement}
+          open={viewDialogOpen}
+          onOpenChange={setViewDialogOpen}
+        />
+      )}
+    </>
   )
 }

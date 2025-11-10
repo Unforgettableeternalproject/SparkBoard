@@ -42,15 +42,15 @@ function checkPermission(user, action, resource = null) {
     case 'create:task':
       return true; // All authenticated users can create tasks
     
-    // Only owner can update their own task
+    // Owner, Moderators, or Admin can update tasks
     case 'update:task':
       if (!resource) return false;
-      return resource.userId === user.userId || user.isAdmin;
+      return resource.userId === user.userId || user.isModerator || user.isAdmin;
     
-    // Only owner can delete their own task (admins can delete anything)
+    // Owner, Moderators, or Admin can delete tasks
     case 'delete:task':
       if (!resource) return false;
-      return resource.userId === user.userId || user.isAdmin;
+      return resource.userId === user.userId || user.isModerator || user.isAdmin;
     
     // Only moderators/admins can delete announcements
     case 'delete:announcement':

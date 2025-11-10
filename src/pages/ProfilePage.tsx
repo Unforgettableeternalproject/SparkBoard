@@ -26,7 +26,7 @@ import { formatDate } from '@/lib/helpers'
 import { toast } from 'sonner'
 
 export function ProfilePage() {
-  const { user, idToken } = useAuth()
+  const { user, idToken, refreshUser } = useAuth()
   const { items } = useItems(user)
   const [isEditing, setIsEditing] = useState(false)
   const [name, setName] = useState('')
@@ -123,6 +123,28 @@ export function ProfilePage() {
 
     loadProfile()
   }, [user, idToken, API_URL])
+
+  // Sync local state with user object when it updates (from refreshUser)
+  useEffect(() => {
+    if (user) {
+      if (user.avatarUrl && user.avatarUrl !== avatarUrl) {
+        console.log('[ProfilePage] Syncing avatarUrl from user object:', user.avatarUrl)
+        setAvatarUrl(user.avatarUrl)
+      }
+      if (user.name && user.name !== name) {
+        console.log('[ProfilePage] Syncing name from user object:', user.name)
+        setName(user.name)
+      }
+      if (user.email && user.email !== email) {
+        console.log('[ProfilePage] Syncing email from user object:', user.email)
+        setEmail(user.email)
+      }
+      if (user.bio !== undefined && user.bio !== bio) {
+        console.log('[ProfilePage] Syncing bio from user object:', user.bio)
+        setBio(user.bio)
+      }
+    }
+  }, [user?.avatarUrl, user?.name, user?.email, user?.bio])
 
   const saveProfileToBackend = async (updates: { name?: string; email?: string; bio?: string; avatarUrl?: string }) => {
     if (!API_URL || !idToken) {
@@ -240,7 +262,19 @@ export function ProfilePage() {
       setAvatarUrl(publicUrl)
       
       // Save avatar URL to user profile in backend
+      console.log('[ProfilePage] Saving avatar URL to backend:', publicUrl)
       await saveProfileToBackend({ avatarUrl: publicUrl })
+      console.log('[ProfilePage] Avatar URL saved to backend')
+      
+      // Refresh user data to update avatar in navbar
+      console.log('[ProfilePage] Calling refreshUser, exists:', !!refreshUser)
+      if (refreshUser) {
+        console.log('[ProfilePage] About to call refreshUser()')
+        const result = await refreshUser()
+        console.log('[ProfilePage] refreshUser result:', result)
+      } else {
+        console.warn('[ProfilePage] refreshUser function not available')
+      }
       
       toast.success('Avatar uploaded and saved successfully!')
     } catch (error) {
@@ -278,6 +312,11 @@ export function ProfilePage() {
         bio: bio.trim(),
         ...(avatarUrl && { avatarUrl })
       })
+      
+      // Refresh user data to update navbar
+      if (refreshUser) {
+        await refreshUser()
+      }
       
       // Show warning if email verification is needed
       if (result.warning) {

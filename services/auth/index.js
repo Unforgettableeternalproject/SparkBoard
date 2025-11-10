@@ -225,12 +225,18 @@ async function handleUpdateProfile(event) {
 
   // Update Cognito user attributes if name or email changed
   const cognitoUpdates = [];
+  let emailChanged = false;
+  
   if (updates.name) {
     cognitoUpdates.push({ Name: 'name', Value: updates.name });
   }
   if (updates.email) {
-    cognitoUpdates.push({ Name: 'email', Value: updates.email });
-    cognitoUpdates.push({ Name: 'email_verified', Value: 'false' }); // Will need verification
+    // Check if email actually changed
+    if (updates.email !== user.email) {
+      cognitoUpdates.push({ Name: 'email', Value: updates.email });
+      cognitoUpdates.push({ Name: 'email_verified', Value: 'false' }); // Will need verification
+      emailChanged = true;
+    }
   }
 
   if (cognitoUpdates.length > 0) {
@@ -270,7 +276,7 @@ async function handleUpdateProfile(event) {
         updatedAt: profile.updatedAt,
       },
       message: 'Profile updated successfully',
-      ...(updates.email && { warning: 'Email verification required. Please check your inbox.' }),
+      ...(emailChanged && { warning: 'Email verification required. Please check your inbox.' }),
     });
   } catch (error) {
     return createResponse(500, {

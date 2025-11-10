@@ -2,7 +2,7 @@ import { User } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import LogoImage from '@/assets/Logo.png'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
@@ -159,6 +159,7 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
                   <Avatar>
+                    {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name} />}
                     <AvatarFallback className="bg-primary text-primary-foreground">
                       {initials}
                     </AvatarFallback>

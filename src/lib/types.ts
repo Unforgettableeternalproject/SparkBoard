@@ -5,6 +5,8 @@ export interface User {
   orgId: string
   'cognito:groups'?: string[]
   role?: 'Admin' | 'Moderators' | 'Users'
+  avatarUrl?: string
+  bio?: string
 }
 
 export interface UserProfile {

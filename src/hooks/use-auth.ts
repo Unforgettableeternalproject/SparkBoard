@@ -58,7 +58,7 @@ export function useAuth() {
     const cognitoUser = userPool.getCurrentUser()
     
     if (cognitoUser) {
-      cognitoUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+      cognitoUser.getSession(async (err: Error | null, session: CognitoUserSession | null) => {
         if (err || !session?.isValid()) {
           setUser(null)
           saveIdToken(null)
@@ -71,6 +71,39 @@ export function useAuth() {
         
         setUser(user)
         saveIdToken(token)
+        
+        // Load profile data from backend API
+        try {
+          const apiUrl = import.meta.env.VITE_API_URL
+          if (apiUrl) {
+            const response = await fetch(`${apiUrl}/auth/me`, {
+              method: 'GET',
+              headers: {
+                'Authorization': token,
+              },
+            })
+
+            if (response.ok) {
+              const data = await response.json()
+              if (data.user) {
+                setUser(prevUser => {
+                  if (!prevUser) return null
+                  return {
+                    ...prevUser,
+                    name: data.user.name || prevUser.name,
+                    email: data.user.email || prevUser.email,
+                    avatarUrl: data.user.avatarUrl,
+                    bio: data.user.bio,
+                  }
+                })
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Failed to load profile on mount:', error)
+          // Continue with Cognito data even if profile load fails
+        }
+        
         setIsLoading(false)
       })
     } else {
@@ -91,12 +124,44 @@ export function useAuth() {
       })
 
       cognitoUser.authenticateUser(authenticationDetails, {
-        onSuccess: (session: CognitoUserSession) => {
+        onSuccess: async (session: CognitoUserSession) => {
           const user = sessionToUser(session, email)
           const token = session.getIdToken().getJwtToken()
           
           setUser(user)
           saveIdToken(token)
+          
+          // Load profile data from backend API
+          try {
+            const apiUrl = import.meta.env.VITE_API_URL
+            if (apiUrl) {
+              const response = await fetch(`${apiUrl}/auth/me`, {
+                method: 'GET',
+                headers: {
+                  'Authorization': token,
+                },
+              })
+
+              if (response.ok) {
+                const data = await response.json()
+                if (data.user) {
+                  setUser(prevUser => {
+                    if (!prevUser) return null
+                    return {
+                      ...prevUser,
+                      name: data.user.name || prevUser.name,
+                      email: data.user.email || prevUser.email,
+                      avatarUrl: data.user.avatarUrl,
+                      bio: data.user.bio,
+                    }
+                  })
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Failed to load profile after login:', error)
+          }
+          
           resolve(true)
         },
         onFailure: (err) => {
@@ -182,9 +247,96 @@ export function useAuth() {
       setUser(user)
       saveIdToken(tokens.id_token)
       
+      // Load profile data from backend API
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL
+        if (apiUrl) {
+          const profileResponse = await fetch(`${apiUrl}/auth/me`, {
+            method: 'GET',
+            headers: {
+              'Authorization': tokens.id_token,
+            },
+          })
+
+          if (profileResponse.ok) {
+            const data = await profileResponse.json()
+            if (data.user) {
+              setUser(prevUser => {
+                if (!prevUser) return null
+                return {
+                  ...prevUser,
+                  name: data.user.name || prevUser.name,
+                  email: data.user.email || prevUser.email,
+                  avatarUrl: data.user.avatarUrl,
+                  bio: data.user.bio,
+                }
+              })
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load profile after OAuth:', error)
+      }
+      
       return true
     } catch (error) {
       console.error('OAuth callback error:', error)
+      return false
+    }
+  }
+
+  // Refresh user data from backend API
+  const refreshUser = async () => {
+    console.log('[use-auth] refreshUser called, idToken:', idToken ? 'exists' : 'missing')
+    if (!idToken) return false
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL
+      console.log('[use-auth] API URL:', apiUrl)
+      if (!apiUrl) return false
+
+      const response = await fetch(`${apiUrl}/auth/me`, {
+        method: 'GET',
+        headers: {
+          'Authorization': idToken,
+        },
+      })
+
+      console.log('[use-auth] Response status:', response.status)
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[use-auth] Profile data received:', data)
+        if (data.user) {
+          console.log('[use-auth] About to update user state...')
+          // Update user state with profile data from backend
+          setUser(prevUser => {
+            console.log('[use-auth] Inside setUser callback, prevUser:', prevUser)
+            if (!prevUser) {
+              console.warn('[use-auth] prevUser is null, cannot update')
+              return null
+            }
+            const updatedUser = {
+              ...prevUser,
+              name: data.user.name || prevUser.name,
+              email: data.user.email || prevUser.email,
+              avatarUrl: data.user.avatarUrl,
+              bio: data.user.bio,
+            }
+            console.log('[use-auth] Updated user state:', updatedUser)
+            return updatedUser
+          })
+          console.log('[use-auth] setUser called successfully')
+          return true
+        } else {
+          console.warn('[use-auth] No user data in response')
+        }
+      } else {
+        const errorText = await response.text()
+        console.error('[use-auth] API error:', response.status, errorText)
+      }
+      return false
+    } catch (error) {
+      console.error('[use-auth] Failed to refresh user:', error)
       return false
     }
   }
@@ -198,5 +350,6 @@ export function useAuth() {
     logout,
     loginWithHostedUI,
     handleOAuthCallback,
+    refreshUser,
   }
 }

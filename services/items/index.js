@@ -240,6 +240,8 @@ async function getItems(event) {
       // Announcement-specific fields
       priority: item.priority,
       expiresAt: item.expiresAt,
+      isPinned: item.isPinned,
+      pinnedUntil: item.pinnedUntil,
     }));
 
     // Generate next token if there are more results
@@ -552,6 +554,8 @@ async function updateItem(event) {
         completedAt: updateResult.Attributes.completedAt,
         priority: updateResult.Attributes.priority,
         expiresAt: updateResult.Attributes.expiresAt,
+        isPinned: updateResult.Attributes.isPinned,
+        pinnedUntil: updateResult.Attributes.pinnedUntil,
       },
     });
   } catch (error) {

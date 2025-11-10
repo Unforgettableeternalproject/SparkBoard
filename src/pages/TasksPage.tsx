@@ -1,33 +1,83 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useAuth } from '@/hooks/use-auth'
 import { useItems } from '@/hooks/use-items'
+import { useSearchParams } from 'react-router-dom'
 import { CreateItemInput } from '@/lib/types'
 import { ItemCard } from '@/components/ItemCard'
 import { KanbanView } from '@/components/KanbanView'
 import { CreateItemDialog } from '@/components/CreateItemDialog'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Plus, Kanban, List } from '@phosphor-icons/react'
+import { Badge } from '@/components/ui/badge'
+import { Plus, Kanban, List, X } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 
 export function TasksPage() {
   const { user } = useAuth()
   const { items, createItem, deleteItem, updateItem } = useItems(user)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban')
+
+  const activeFilter = searchParams.get('filter')
 
   // Filter only tasks
   const tasks = items.filter((item) => item.type === 'task')
 
-  // Separate active and completed tasks
-  const activeTasks = tasks.filter((task) => task.status !== 'completed')
-  const completedTasks = tasks.filter((task) => task.status === 'completed')
+  // Apply quick filters
+  const filteredTasks = useMemo(() => {
+    if (!activeFilter) return tasks
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    switch (activeFilter) {
+      case 'due-today':
+        return tasks.filter(task => {
+          if (!task.deadline || task.status === 'completed') return false
+          const deadline = new Date(task.deadline)
+          deadline.setHours(0, 0, 0, 0)
+          return deadline.getTime() === today.getTime()
+        })
+      
+      case 'my-tasks':
+        return tasks.filter(task => task.userId === user?.sub || task.userId === user?.id)
+      
+      case 'overdue':
+        return tasks.filter(task => {
+          if (!task.deadline || task.status === 'completed') return false
+          return new Date(task.deadline) < new Date()
+        })
+      
+      default:
+        return tasks
+    }
+  }, [tasks, activeFilter, user])
+
+  // Separate active and completed tasks from filtered results
+  const activeTasks = filteredTasks.filter((task) => task.status !== 'completed')
+  const completedTasks = filteredTasks.filter((task) => task.status === 'completed')
   
-  // Calculate statistics
+  // Calculate statistics (from all tasks, not filtered)
   const overdueTasks = tasks.filter(task => {
     if (!task.deadline || task.status === 'completed') return false
     return new Date(task.deadline) < new Date()
   })
+
+  const clearFilter = () => {
+    setSearchParams({})
+  }
+
+  const getFilterLabel = (filter: string | null) => {
+    switch (filter) {
+      case 'due-today': return 'Due Today'
+      case 'my-tasks': return 'My Tasks'
+      case 'overdue': return 'Overdue'
+      default: return null
+    }
+  }
 
   const handleCreateItem = async (input: CreateItemInput) => {
     await createItem(input)
@@ -40,6 +90,24 @@ export function TasksPage() {
 
   return (
     <div className="space-y-6">
+      {/* Active Filter Badge */}
+      {activeFilter && (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-sm">
+            Filtered by: {getFilterLabel(activeFilter)}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilter}
+            className="h-6"
+          >
+            <X size={14} className="mr-1" />
+            Clear Filter
+          </Button>
+        </div>
+      )}
+
       {/* Header with Stats */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">

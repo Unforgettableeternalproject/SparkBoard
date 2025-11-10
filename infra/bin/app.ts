@@ -5,6 +5,7 @@ import { StorageStack } from '../lib/storage-stack';
 import { AuthStack } from '../lib/auth-stack';
 import { ApiStack } from '../lib/api-stack';
 import { MonitoringStack } from '../lib/monitoring-stack';
+import { FrontendStack } from '../lib/frontend-stack';
 
 const app = new cdk.App();
 
@@ -54,10 +55,22 @@ const monitoringStack = new MonitoringStack(app, `${stackPrefix}-Monitoring`, {
   alarmEmail,
 });
 
+// 5. Frontend Stack - S3 + CloudFront
+const frontendStack = new FrontendStack(app, `${stackPrefix}-Frontend`, {
+  env,
+  description: 'SparkBoard Frontend - S3 Static Website with CloudFront CDN',
+  apiUrl: apiStack.api.url,
+  userPoolId: authStack.userPool.userPoolId,
+  userPoolClientId: authStack.userPoolClient.userPoolClientId,
+  cognitoDomain: `sparkboard-${process.env.CDK_DEFAULT_ACCOUNT || '434824683139'}.auth.${env.region}.amazoncognito.com`,
+});
+
 // Add stack dependencies
 apiStack.addDependency(storageStack);
 apiStack.addDependency(authStack);
 monitoringStack.addDependency(apiStack);
+frontendStack.addDependency(apiStack);
+frontendStack.addDependency(authStack);
 
 // Add tags to all resources
 cdk.Tags.of(app).add('Project', 'SparkBoard');

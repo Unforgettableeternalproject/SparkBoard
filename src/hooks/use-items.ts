@@ -1,52 +1,105 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { SparkItem, CreateItemInput } from '@/lib/types'
 import { User } from '@/lib/types'
 import { toast } from 'sonner'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+const POLLING_INTERVAL = 30000 // 30 seconds
 
 export function useItems(user: User | null) {
   const [items, setItems] = useState<SparkItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const lastFetchTimeRef = useRef<number>(Date.now())
   
-  // Fetch items from API when user is authenticated
-  useEffect(() => {
+  // Fetch items from API
+  const fetchItems = useCallback(async (silent = false) => {
     if (!user) {
       setItems([])
       return
     }
     
-    const fetchItems = async () => {
-      setIsLoading(true)
-      try {
-        const idToken = localStorage.getItem('cognito_id_token')
-        if (!idToken) {
-          console.error('No ID token found')
-          return
+    if (!silent) setIsLoading(true)
+    
+    try {
+      const idToken = localStorage.getItem('cognito_id_token')
+      if (!idToken) {
+        console.error('[use-items] No ID token found')
+        return
+      }
+
+      const response = await fetch(`${API_URL}/items`, {
+        headers: {
+          'Authorization': idToken,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch items: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      const newItems = data.items || []
+      
+      // Check if there are changes (for polling)
+      if (silent && items.length > 0) {
+        const hasChanges = 
+          newItems.length !== items.length ||
+          JSON.stringify(newItems.map((i: SparkItem) => i.sk).sort()) !== 
+          JSON.stringify(items.map(i => i.sk).sort())
+        
+        if (hasChanges) {
+          console.log('[use-items] Changes detected, updating items')
+          toast.info('New updates loaded', {
+            description: 'The content has been refreshed',
+            duration: 3000,
+          })
         }
-
-        const response = await fetch(`${API_URL}/items`, {
-          headers: {
-            'Authorization': idToken,
-          },
-        })
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch items: ${response.statusText}`)
-        }
-
-        const data = await response.json()
-        setItems(data.items || [])
-      } catch (error) {
-        console.error('Error fetching items:', error)
+      }
+      
+      setItems(newItems)
+      lastFetchTimeRef.current = Date.now()
+    } catch (error) {
+      console.error('[use-items] Error fetching items:', error)
+      if (!silent) {
         toast.error('Failed to load items')
-      } finally {
-        setIsLoading(false)
+      }
+    } finally {
+      if (!silent) setIsLoading(false)
+    }
+  }, [user, items])
+  
+  // Initial fetch and setup polling
+  useEffect(() => {
+    if (!user) {
+      setItems([])
+      // Clear polling interval if user logs out
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      return
+    }
+    
+    // Initial fetch
+    fetchItems(false)
+    
+    // Setup polling interval
+    console.log('[use-items] Setting up polling interval (30s)')
+    pollingIntervalRef.current = setInterval(() => {
+      console.log('[use-items] Polling for updates...')
+      fetchItems(true)
+    }, POLLING_INTERVAL)
+    
+    // Cleanup on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        console.log('[use-items] Clearing polling interval')
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
       }
     }
-
-    fetchItems()
-  }, [user])
+  }, [user, fetchItems])
   
   const createItem = async (input: CreateItemInput) => {
     if (!user) return
@@ -58,6 +111,7 @@ export function useItems(user: User | null) {
         return
       }
 
+      console.log('use-items createItem - Sending to API:', input)
       const response = await fetch(`${API_URL}/items`, {
         method: 'POST',
         headers: {
@@ -75,6 +129,8 @@ export function useItems(user: User | null) {
           // Announcement-specific fields
           priority: input.type === 'announcement' ? input.priority : undefined,
           expiresAt: input.type === 'announcement' ? input.expiresAt : undefined,
+          isPinned: input.type === 'announcement' ? input.isPinned : undefined,
+          pinnedUntil: input.type === 'announcement' ? input.pinnedUntil : undefined,
         }),
       })
 
@@ -83,6 +139,7 @@ export function useItems(user: User | null) {
       }
 
       const data = await response.json()
+      console.log('use-items createItem - API response:', data)
       
       // Convert API response to SparkItem format with all fields
       const newItem: SparkItem = {
@@ -107,8 +164,11 @@ export function useItems(user: User | null) {
         ...(data.item.type === 'announcement' && {
           priority: data.item.priority,
           expiresAt: data.item.expiresAt,
+          isPinned: data.item.isPinned,
+          pinnedUntil: data.item.pinnedUntil,
         }),
       }
+      console.log('use-items createItem - Created newItem:', newItem)
       
       setItems((current) => [newItem, ...current])
       toast.success('Item created successfully')

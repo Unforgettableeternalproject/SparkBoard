@@ -127,6 +127,19 @@ export function CreateItemDialog({
       return
     }
 
+    // Validate dates for announcements
+    if (type === 'announcement') {
+      // Check if isPinned and pinnedUntil is set
+      if (isPinned && pinnedUntil && expiresAt) {
+        const pinnedDate = new Date(pinnedUntil)
+        const expiresDate = new Date(expiresAt)
+        if (pinnedDate >= expiresDate) {
+          toast.error('Pin until date must be earlier than expiration date')
+          return
+        }
+      }
+    }
+
     if (type === 'task') {
       onCreateItem({
         type: 'task',
@@ -137,8 +150,8 @@ export function CreateItemDialog({
         attachments: attachments.length > 0 ? attachments : undefined
       })
     } else {
-      onCreateItem({
-        type: 'announcement',
+      const announcementData = {
+        type: 'announcement' as const,
         title: title.trim(),
         content: content.trim(),
         priority,
@@ -146,7 +159,9 @@ export function CreateItemDialog({
         isPinned,
         pinnedUntil: pinnedUntil || undefined,
         attachments: attachments.length > 0 ? attachments : undefined
-      })
+      }
+      console.log('CreateItemDialog - Creating announcement with data:', announcementData)
+      onCreateItem(announcementData)
     }
 
     // Reset form
@@ -237,6 +252,7 @@ export function CreateItemDialog({
                   type="datetime-local"
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
                 />
               </div>
 
@@ -312,6 +328,7 @@ export function CreateItemDialog({
                   type="datetime-local"
                   value={expiresAt}
                   onChange={(e) => setExpiresAt(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
                 />
               </div>
 
@@ -322,10 +339,13 @@ export function CreateItemDialog({
                     checked={isPinned}
                     onCheckedChange={(checked) => setIsPinned(checked as boolean)}
                   />
-                  <Label htmlFor="isPinned" className="flex items-center gap-2 cursor-pointer">
+                  <label 
+                    htmlFor="isPinned" 
+                    className="flex items-center gap-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
                     <PushPin size={16} weight="duotone" />
                     Pin this announcement to top banner
-                  </Label>
+                  </label>
                 </div>
               </div>
 
@@ -340,6 +360,8 @@ export function CreateItemDialog({
                     type="datetime-local"
                     value={pinnedUntil}
                     onChange={(e) => setPinnedUntil(e.target.value)}
+                    min={new Date().toISOString().slice(0, 16)}
+                    max={expiresAt || undefined}
                   />
                   <p className="text-xs text-muted-foreground">
                     Leave empty to pin indefinitely. Announcement will automatically unpin after this date.
