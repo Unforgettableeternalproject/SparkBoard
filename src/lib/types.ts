@@ -7,6 +7,30 @@ export interface User {
   role?: 'Admin' | 'Moderators' | 'Users'
 }
 
+export interface UserProfile {
+  userId: string
+  email: string
+  name: string
+  bio?: string
+  avatar?: string
+  joinedAt: string
+  stats: {
+    tasksCreated: number
+    tasksCompleted: number
+    announcementsCreated: number
+  }
+}
+
+export interface Annotation {
+  id: string
+  itemSk: string
+  adminId: string
+  adminName: string
+  content: string
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface SubTask {
   id: string
   title: string
@@ -31,6 +55,7 @@ export interface Task {
   subtasks: SubTask[]
   completedAt?: string
   attachments?: FileAttachment[]
+  annotations?: Annotation[]
 }
 
 export interface Announcement {
@@ -47,6 +72,7 @@ export interface Announcement {
   priority?: 'normal' | 'high' | 'urgent'
   expiresAt?: string // ISO date string
   attachments?: FileAttachment[]
+  annotations?: Annotation[]
 }
 
 export type SparkItem = Task | Announcement

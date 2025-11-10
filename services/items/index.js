@@ -228,6 +228,7 @@ async function getItems(event) {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       attachments: item.attachments,
+      annotations: item.annotations,
       // Task-specific fields
       subtasks: item.subtasks,
       deadline: item.deadline,
@@ -280,10 +281,13 @@ async function deleteItem(event) {
     }
 
     // Extract item SK from path parameters
-    const sk = event.pathParameters?.sk;
-    if (!sk) {
+    const skParam = event.pathParameters?.sk;
+    if (!skParam) {
       return createErrorResponse(400, 'BadRequest', 'Item SK is required');
     }
+
+    // Normalize SK format - add ITEM# prefix if not present
+    const sk = skParam.startsWith('ITEM#') ? skParam : `ITEM#${skParam}`;
 
     // Query the item to check ownership and type
     const queryCommand = new QueryCommand({
@@ -352,10 +356,13 @@ async function updateItem(event) {
     }
 
     // Extract item SK from path parameters
-    const sk = event.pathParameters?.sk;
-    if (!sk) {
+    const skParam = event.pathParameters?.sk;
+    if (!skParam) {
       return createErrorResponse(400, 'BadRequest', 'Item SK is required');
     }
+
+    // Ensure SK has ITEM# prefix (handle both formats: "ITEM#xxx" and "xxx")
+    const sk = skParam.startsWith('ITEM#') ? skParam : `ITEM#${skParam}`;
 
     // Parse request body
     const body = JSON.parse(event.body || '{}');
@@ -429,6 +436,13 @@ async function updateItem(event) {
           expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
         }
       }
+
+      if (body.deadline !== undefined) {
+        counter++;
+        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'deadline';
+        expressionAttributeValues[`:val${counter}`] = body.deadline;
+      }
     }
 
     // Update common fields
@@ -444,6 +458,14 @@ async function updateItem(event) {
       updateExpressions.push(`#attr${counter} = :val${counter}`);
       expressionAttributeNames[`#attr${counter}`] = 'content';
       expressionAttributeValues[`:val${counter}`] = body.content;
+    }
+
+    // Update annotations (for admin notes)
+    if (body.annotations !== undefined) {
+      counter++;
+      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'annotations';
+      expressionAttributeValues[`:val${counter}`] = body.annotations;
     }
 
     // Always update updatedAt

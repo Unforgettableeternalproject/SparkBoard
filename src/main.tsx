@@ -8,11 +8,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App.tsx'
 import { ErrorFallback } from './ErrorFallback.tsx'
 
-import "./main.css"
-import "./styles/theme.css"
+// Import CSS files
 import "./index.css"
 
-console.log('SparkBoard starting...')
+console.log('✨ SparkBoard v2.0 starting...')
 
 const queryClient = new QueryClient({
   defaultOptions: {

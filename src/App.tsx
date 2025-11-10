@@ -4,10 +4,12 @@ import { useAuth } from './hooks/use-auth'
 import { useItems } from './hooks/use-items'
 import { LoginForm } from './components/LoginForm'
 import { Header } from './components/Header'
+import { Sidebar } from './components/Sidebar'
 import { ItemList } from './components/ItemList'
 import { AdminDashboard } from './pages/AdminDashboard'
 import { TasksPage } from './pages/TasksPage'
 import { AnnouncementsPage } from './pages/AnnouncementsPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { AnnouncementBanner } from './components/AnnouncementBanner'
 import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
@@ -56,18 +58,32 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-background">
-        <Header user={user!} onLogout={logout} />
+      <div className="min-h-screen bg-background flex flex-col">
+        <Header user={user!} onLogout={logout} items={items || []} />
         <AnnouncementBanner announcements={items || []} />
-        <main className="container mx-auto px-4 py-8">
-          <Routes>
-            <Route path="/" element={<ItemList items={items || []} currentUser={user!} onCreateItem={createItem} onDeleteItem={deleteItem} onUpdateItem={updateItem} />} />
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/announcements" element={<AnnouncementsPage />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
+        <div className="flex-1 flex overflow-hidden">
+          {/* Sidebar - Hidden on mobile, visible on desktop */}
+          <div className="hidden lg:block w-64 border-r bg-card/50 overflow-y-auto">
+            <Sidebar 
+              items={items || []} 
+              isAdmin={user?.['cognito:groups']?.includes('Admin')}
+            />
+          </div>
+          
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div className="container mx-auto px-4 py-8 animate-fade-in">
+              <Routes>
+                <Route path="/" element={<ItemList items={items || []} currentUser={user!} onCreateItem={createItem} onDeleteItem={deleteItem} onUpdateItem={updateItem} />} />
+                <Route path="/tasks" element={<TasksPage />} />
+                <Route path="/announcements" element={<AnnouncementsPage />} />
+                <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
+          </main>
+        </div>
         <Toaster />
       </div>
     </BrowserRouter>

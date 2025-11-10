@@ -50,9 +50,7 @@ export function AnnouncementsPage() {
   }
 
   const handleDeleteItem = async (itemSk: string) => {
-    if (window.confirm('Are you sure you want to delete this announcement?')) {
-      await deleteItem(itemSk)
-    }
+    await deleteItem(itemSk)
   }
 
   // Check if user can create announcements (moderator or admin)

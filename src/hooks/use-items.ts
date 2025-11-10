@@ -176,9 +176,18 @@ export function useItems(user: User | null) {
       
       // Update local state with the updated item
       setItems((current) =>
-        current.map((item) =>
-          item.sk === itemSk ? { ...item, ...data.item } : item
-        )
+        current.map((item) => {
+          if (item.sk === itemSk) {
+            // Merge the updates with existing item data
+            return {
+              ...item,
+              ...updates,
+              // Ensure updatedAt is set
+              updatedAt: data.item?.updatedAt || new Date().toISOString()
+            }
+          }
+          return item
+        })
       )
       
       toast.success('Item updated successfully')

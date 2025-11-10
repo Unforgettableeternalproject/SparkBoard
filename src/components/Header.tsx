@@ -3,15 +3,47 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
-import { SignOut, User as UserIcon, ChartBar, Table, ListChecks, MegaphoneSimple } from '@phosphor-icons/react'
+import { Sidebar } from './Sidebar'
+import { SignOut, User as UserIcon, ChartBar, Table, ListChecks, MegaphoneSimple, Moon, Sun, List as ListIcon } from '@phosphor-icons/react'
+import { useState, useEffect } from 'react'
+import { SparkItem } from '@/lib/types'
 
 interface HeaderProps {
   user: User
   onLogout: () => void
+  items?: SparkItem[]
 }
 
-export function Header({ user, onLogout }: HeaderProps) {
+export function Header({ user, onLogout, items = [] }: HeaderProps) {
+  const [isDark, setIsDark] = useState(false)
+  
+  useEffect(() => {
+    // Check for saved theme preference or default to light mode
+    const savedTheme = localStorage.getItem('theme')
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && prefersDark)
+    
+    setIsDark(shouldBeDark)
+    if (shouldBeDark) {
+      document.documentElement.classList.add('dark')
+    }
+  }, [])
+  
+  const toggleTheme = () => {
+    const newIsDark = !isDark
+    setIsDark(newIsDark)
+    
+    if (newIsDark) {
+      document.documentElement.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }
+  
   const initials = user.name
     .split(' ')
     .map((n) => n[0])
@@ -38,6 +70,38 @@ export function Header({ user, onLogout }: HeaderProps) {
           </div>
           
           <div className="flex items-center gap-2">
+            {/* Mobile Sidebar Toggle */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="lg:hidden smooth-transition"
+                >
+                  <ListIcon size={20} weight="duotone" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64 p-0">
+                <SheetHeader className="px-4 py-6 border-b">
+                  <SheetTitle>Navigation</SheetTitle>
+                </SheetHeader>
+                <Sidebar 
+                  items={items} 
+                  isAdmin={isAdmin}
+                />
+              </SheetContent>
+            </Sheet>
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              className="smooth-transition"
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {isDark ? <Sun size={18} weight="duotone" /> : <Moon size={18} weight="duotone" />}
+            </Button>
+            
             <div className="flex gap-1 mr-2">
               <Button
                 variant="ghost"
@@ -101,9 +165,11 @@ export function Header({ user, onLogout }: HeaderProps) {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <UserIcon className="mr-2" size={16} />
-                  Profile
+                <DropdownMenuItem asChild>
+                  <Link to="/profile" className="cursor-pointer">
+                    <UserIcon className="mr-2" size={16} />
+                    Profile
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={onLogout} className="text-destructive focus:text-destructive">

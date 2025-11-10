@@ -5,8 +5,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X } from '@phosphor-icons/react'
+import { EditItemDialog } from '@/components/EditItemDialog'
+import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
+import { cn } from '@/lib/utils'
 
 interface ItemCardProps {
   item: SparkItem
@@ -43,6 +45,8 @@ const getPriorityColor = (priority?: 'normal' | 'high' | 'urgent') => {
 export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProps) {
   const Icon = item.type === 'task' ? ListChecks : Megaphone
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
   
   // Check if current user can delete this item
   const canDelete = item.userId === currentUser.sub || 
@@ -52,41 +56,74 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   const canEdit = item.type === 'task' && (item.userId === currentUser.sub || 
                   currentUser['cognito:groups']?.includes('Admin'))
   
-  // Handle subtask toggle
+  // ✨ Enhanced subtask toggle with loading state and visual feedback
   const handleSubtaskToggle = async (subtaskId: string) => {
-    if (!onUpdate || !item.subtasks) return
+    if (!onUpdate || item.type !== 'task' || !item.subtasks) return
     
+    setIsUpdating(true)
     const updatedSubtasks = item.subtasks.map(st => 
       st.id === subtaskId 
         ? { ...st, completed: !st.completed, completedAt: !st.completed ? new Date().toISOString() : undefined }
         : st
     )
     
-    await onUpdate(item.sk, { subtasks: updatedSubtasks })
+    // Check if all subtasks are completed to update task status
+    const allCompleted = updatedSubtasks.every(st => st.completed)
+    const anyCompleted = updatedSubtasks.some(st => st.completed)
+    
+    // Determine new task status
+    let newStatus: 'active' | 'completed' = 'active'
+    if (allCompleted) {
+      newStatus = 'completed'
+    }
+    
+    try {
+      await onUpdate(item.sk, { 
+        subtasks: updatedSubtasks,
+        status: newStatus,
+        completedAt: allCompleted ? new Date().toISOString() : undefined
+      })
+    } catch (error) {
+      console.error('Failed to update subtask:', error)
+    } finally {
+      setIsUpdating(false)
+    }
   }
   
   return (
-    <Card className="transition-all hover:shadow-lg hover:border-primary/20 flex flex-col">
+    <Card className={cn(
+      "smooth-transition hover-lift flex flex-col animate-slide-in-up",
+      isUpdating && "opacity-60 pointer-events-none"
+    )}>
       <CardHeader>
         <div className="flex items-start justify-between gap-2 sm:gap-4">
           <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
-            <div className="mt-1 flex-shrink-0">
+            <div className="mt-1 flex-shrink-0 transition-transform duration-200 hover:scale-110">
               <Icon 
-                size={24} 
-                className={item.type === 'task' ? 'text-primary' : 'text-accent'} 
+                size={24}
+                weight="duotone"
+                className={cn(
+                  "transition-colors",
+                  item.type === 'task' ? 'text-primary' : 'text-secondary'
+                )} 
               />
             </div>
             <div className="flex-1 min-w-0">
-              <CardTitle className="text-base sm:text-lg mb-1 break-words">{item.title}</CardTitle>
-              <CardDescription className="text-xs flex items-center gap-1 sm:gap-2 flex-wrap">
-                <span className="truncate max-w-[120px] sm:max-w-none">{item.userName}</span>
-                <span className="hidden sm:inline">•</span>
-                <span className="text-[10px] sm:text-xs">{formatDate(item.createdAt)}</span>
-                <span className="hidden md:inline">•</span>
-                <Badge variant="outline" className="text-[10px] sm:text-xs font-mono hidden md:inline-flex">
-                  {item.sk}
+              <CardTitle className="text-base sm:text-lg mb-1.5 break-words font-semibold">{item.title}</CardTitle>
+              <div className="flex flex-col gap-1 text-xs">
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <span className="truncate max-w-[120px] sm:max-w-[200px] font-medium text-muted-foreground">{item.userName}</span>
+                  <span className="text-muted-foreground shrink-0">•</span>
+                  <time dateTime={item.createdAt} className="text-[10px] sm:text-xs text-muted-foreground shrink-0">{formatDate(item.createdAt)}</time>
+                </div>
+                <Badge 
+                  variant="outline" 
+                  className="text-[10px] font-mono w-fit max-w-full"
+                  title={item.sk}
+                >
+                  <span className="truncate block">{item.sk}</span>
                 </Badge>
-              </CardDescription>
+              </div>
             </div>
           </div>
           <div className="flex flex-col gap-1 sm:gap-2 items-end flex-shrink-0">
@@ -95,22 +132,28 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => {/* TODO: Open edit dialog */}}
-                  className="h-7 w-7 text-muted-foreground hover:text-primary"
+                  onClick={() => setEditDialogOpen(true)}
+                  disabled={isUpdating}
+                  className="h-7 w-7 text-muted-foreground hover:text-primary smooth-transition hover:scale-110"
                   title="Edit task"
                 >
-                  <PencilSimple size={14} />
+                  <PencilSimple size={14} weight="duotone" />
                 </Button>
               )}
               {canDelete && onDelete && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => onDelete(item.sk)}
-                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    if (window.confirm(`Are you sure you want to delete "${item.title}"?`)) {
+                      onDelete(item.sk)
+                    }
+                  }}
+                  disabled={isUpdating}
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive smooth-transition hover:scale-110"
                   title="Delete item"
                 >
-                  <Trash size={14} />
+                  <Trash size={14} weight="duotone" />
                 </Button>
               )}
             </div>
@@ -162,6 +205,29 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
             </div>
           )}
           
+          {/* Admin Annotations */}
+          {item.annotations && item.annotations.length > 0 && (
+            <div className="space-y-2 p-3 bg-muted/50 rounded-lg border border-border">
+              <div className="flex items-center gap-2">
+                <Note size={16} weight="duotone" className="text-warning" />
+                <p className="text-xs font-semibold">Admin Notes</p>
+              </div>
+              {item.annotations.map((annotation) => (
+                <div key={annotation.id} className="space-y-1 pl-5">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-medium">{annotation.adminName}</p>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(annotation.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {annotation.content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {item.type === 'task' && item.subtasks && item.subtasks.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -170,18 +236,24 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
               </p>
               <div className="space-y-1.5">
                 {item.subtasks.map((subtask) => (
-                  <div key={subtask.id} className="flex items-start gap-2 text-sm">
+                  <div key={subtask.id} className="group flex items-start gap-2 text-sm px-2 py-1.5 -mx-2 rounded-md hover:bg-accent/5 smooth-transition">
                     <Checkbox 
                       checked={subtask.completed} 
-                      disabled={!canEdit || !onUpdate}
+                      disabled={!canEdit || !onUpdate || isUpdating}
                       onCheckedChange={() => handleSubtaskToggle(subtask.id)}
-                      className={`mt-0.5 flex-shrink-0 ${canEdit && onUpdate ? 'cursor-pointer' : 'pointer-events-none'}`}
+                      className={cn(
+                        "mt-0.5 flex-shrink-0 smooth-transition",
+                        canEdit && onUpdate && !isUpdating ? "cursor-pointer hover:scale-110" : "pointer-events-none"
+                      )}
                     />
-                    <span className={`break-words flex-1 ${subtask.completed ? 'line-through text-muted-foreground' : ''}`}>
+                    <span className={cn(
+                      "break-words flex-1 smooth-transition",
+                      subtask.completed && "line-through text-muted-foreground opacity-60"
+                    )}>
                       {subtask.title}
                     </span>
                     {subtask.completed && subtask.completedAt && (
-                      <span className="text-xs text-muted-foreground ml-auto">
+                      <span className="text-xs text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 smooth-transition">
                         <CheckCircle size={12} className="inline mr-1" />
                         {formatDate(subtask.completedAt)}
                       </span>
@@ -311,6 +383,18 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Dialog */}
+      {canEdit && onUpdate && (
+        <EditItemDialog
+          item={item}
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          onSave={async (itemSk, updates) => {
+            await onUpdate(itemSk, updates)
+          }}
+        />
+      )}
     </Card>
   )
 }
