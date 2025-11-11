@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { EditItemDialog } from '@/components/EditItemDialog'
+import { MarkdownContent } from '@/components/MarkdownContent'
 import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note, Archive } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
 import { cn } from '@/lib/utils'
@@ -55,7 +56,7 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   // Check permissions
   const isAdmin = currentUser['cognito:groups']?.includes('Admin')
   const isModerator = currentUser['cognito:groups']?.includes('Moderators')
-  const isOwner = item.userId === currentUser.sub
+  const isOwner = item.userId === currentUser.sub || item.userId === currentUser.id
   
   // For tasks:
   // - If never been in progress: show delete button (owner/mod/admin)
@@ -66,10 +67,16 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
     ? (isAdmin || isModerator)
     : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
   
-  // Can archive if task is completed (owner/moderator/admin)
-  const canArchive = item.type === 'task' && onUpdate && (isOwner || isAdmin || isModerator) && item.status === 'completed'
+  // Can archive if task has been in progress (has subtasks history)
+  // Owner/moderator/admin can archive tasks that have been in progress
+  // Archive status will be calculated based on completion state:
+  // - 'completed': all subtasks done
+  // - 'partial': some subtasks done
+  // - 'aborted': no subtasks done
+  // - 'forced': admin forced archive
+  const canArchive = item.type === 'task' && onUpdate && item.hasBeenInProgress && (isOwner || isAdmin || isModerator)
   
-  // Admin can force archive any task
+  // Admin can force archive any task (even without subtasks)
   const canForceArchive = item.type === 'task' && onUpdate && isAdmin
   
   // Check if current user can edit this item
@@ -317,9 +324,9 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
           }}
         >
           {item.content && (
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words overflow-wrap-anywhere">
-              {item.content}
-            </p>
+            <div className="text-sm text-foreground leading-relaxed break-words overflow-wrap-anywhere">
+              <MarkdownContent content={item.content} />
+            </div>
           )}
           
           {/* Task-specific fields */}
@@ -574,7 +581,9 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
             </DialogHeader>
             <div className="space-y-4">
               {item.content && (
-                <p className="text-sm whitespace-pre-wrap break-words">{item.content}</p>
+                <div className="text-sm break-words">
+                  <MarkdownContent content={item.content} />
+                </div>
               )}
               {item.attachments && item.attachments.length > 0 && (
                 <div className="space-y-2">

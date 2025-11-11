@@ -20,17 +20,16 @@ interface HeaderProps {
 }
 
 export function Header({ user, onLogout, items = [], avatarVersion = 0 }: HeaderProps) {
-  const [isDark, setIsDark] = useState(false)
+  const [isDark, setIsDark] = useState(() => {
+    // Initialize from current DOM state
+    return document.documentElement.classList.contains('dark')
+  })
   
   useEffect(() => {
-    // Check for saved theme preference or default to light mode
-    const savedTheme = localStorage.getItem('theme')
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && prefersDark)
-    
-    setIsDark(shouldBeDark)
-    if (shouldBeDark) {
-      document.documentElement.classList.add('dark')
+    // Sync with DOM state on mount (in case it was changed elsewhere)
+    const currentIsDark = document.documentElement.classList.contains('dark')
+    if (currentIsDark !== isDark) {
+      setIsDark(currentIsDark)
     }
   }, [])
   
@@ -168,12 +167,11 @@ export function Header({ user, onLogout, items = [], avatarVersion = 0 }: Header
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
-                  <Avatar>
+                  <Avatar key={avatarVersion}>
                     {user.avatarUrl && (
                       <AvatarImage 
                         src={user.avatarUrl} 
                         alt={user.name}
-                        key={user.avatarUrl}
                       />
                     )}
                     <AvatarFallback className={`${avatarColor} text-white`}>

@@ -206,13 +206,13 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
             
             <div className="space-y-2">
               {subtasks.map((subtask) => (
-                <div key={subtask.id} className="flex items-center gap-2 p-2 rounded-lg border bg-card">
+                <div key={subtask.id} className="flex items-center gap-2 p-2 rounded-lg border bg-card transition-all duration-200 hover:bg-muted/50">
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => toggleSubtask(subtask.id)}
-                    className="h-6 w-6 flex-shrink-0"
+                    className="h-6 w-6 flex-shrink-0 transition-transform hover:scale-110"
                   >
                     {subtask.completed ? (
                       <CheckCircle size={16} weight="fill" className="text-green-600" />
@@ -233,7 +233,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                     variant="ghost"
                     size="icon"
                     onClick={() => removeSubtask(subtask.id)}
-                    className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                    className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive transition-transform hover:scale-110"
                   >
                     <X size={14} />
                   </Button>
@@ -260,6 +260,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                 variant="outline"
                 size="icon"
                 disabled={!newSubtaskTitle.trim()}
+                className="transition-transform hover:scale-110"
               >
                 <Plus size={16} />
               </Button>

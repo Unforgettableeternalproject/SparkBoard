@@ -102,6 +102,10 @@ async function createItem(event) {
     if (itemType === 'task') {
       item.status = 'active';
       item.subtasks = subtasks || [];
+      // If task is created with subtasks, mark it as having been in progress
+      if (subtasks && subtasks.length > 0) {
+        item.hasBeenInProgress = true;
+      }
       if (deadline) item.deadline = deadline;
     } else if (itemType === 'announcement') {
       item.priority = priority || 'normal';
@@ -472,16 +476,29 @@ async function updateItem(event) {
 
         // Set completedAt when transitioning to completed
         if (newStatus === 'completed' && !item.completedAt) {
+          const now = new Date().toISOString();
           counter++;
           setExpressions.push(`#attr${counter} = :val${counter}`);
           expressionAttributeNames[`#attr${counter}`] = 'completedAt';
-          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+          expressionAttributeValues[`:val${counter}`] = now;
           completedAtSet = true;
+          
+          // Set auto-archive timestamp for 3 minutes from now
+          const autoArchiveTime = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
+          expressionAttributeValues[`:val${counter}`] = autoArchiveTime;
         } else if (newStatus !== 'completed' && item.completedAt) {
           // Remove completedAt if moving away from completed status
           counter++;
           removeExpressions.push(`#attr${counter}`);
           expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+          
+          // Also remove autoArchiveAt
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
         }
       }
 

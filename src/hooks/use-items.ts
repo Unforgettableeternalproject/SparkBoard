@@ -98,14 +98,14 @@ export function useItems(user: User | null) {
     }
   }, [user, fetchItems])
   
-  const createItem = async (input: CreateItemInput) => {
-    if (!user) return
+  const createItem = async (input: CreateItemInput): Promise<boolean> => {
+    if (!user) return false
     
     try {
       const idToken = localStorage.getItem('cognito_id_token')
       if (!idToken) {
         toast.error('Authentication required')
-        return
+        return false
       }
 
       console.log('use-items createItem - Sending to API:', input)
@@ -169,9 +169,11 @@ export function useItems(user: User | null) {
       
       setItems((current) => [newItem, ...current])
       toast.success('Item created successfully')
+      return true
     } catch (error) {
       console.error('Error creating item:', error)
       toast.error('Failed to create item')
+      return false
     }
   }
   

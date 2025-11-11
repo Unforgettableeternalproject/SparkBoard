@@ -438,7 +438,9 @@ export function useAuth() {
             return updatedUser
           })
           
-          console.log('[use-auth] setUser updated with cache-busted avatar')
+          // Increment avatar version to force Header re-render
+          setAvatarVersion(prev => prev + 1)
+          console.log('[use-auth] setUser and avatarVersion updated')
           return true
         } else {
           console.warn('[use-auth] No user data in response')
