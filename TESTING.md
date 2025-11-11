@@ -1,5 +1,127 @@
 # SparkBoard 測試指南
 
+## 測試架構
+
+本專案採用三層測試策略：
+1. **單元測試 (Unit Tests)** - Jest
+2. **契約測試 (Contract Tests)** - OpenAPI + Jest
+3. **壓力測試 (Load Tests)** - k6
+
+---
+
+## 1. 單元測試 (Unit Tests)
+
+### 執行方式
+```bash
+cd services/items
+npm test
+```
+
+### 當前狀態
+- ✅ **27 tests passing**
+- 覆蓋範圍:
+  - POST /items (8 tests) - 建立 task/announcement、權限檢查、欄位驗證
+  - GET /items (5 tests) - 分頁、查詢、授權
+  - DELETE /items/{sk} (5 tests) - 刪除權限、所有權檢查
+  - Permission System (4 tests) - Admin/Moderators/Users 角色權限
+  - Field Validation (3 tests) - subtasks、deadline、priority 欄位
+  - OPTIONS (1 test)、Error handling (1 test)
+
+---
+
+## 2. 契約測試 (Contract Tests)
+
+### 安裝與執行
+```bash
+cd tests/contract
+npm install  # 首次執行
+npm test
+```
+
+### 使用認證 Token
+```powershell
+# Windows PowerShell
+$env:AUTH_TOKEN="your-cognito-jwt-token"
+npm test
+
+# Linux/Mac
+export AUTH_TOKEN="your-cognito-jwt-token"
+npm test
+```
+
+### 當前狀態
+- ✅ **10 tests passing**
+- 測試項目:
+  - GET /health - 健康檢查
+  - GET /items - 列表、分頁、授權
+  - POST /items - 建立 task、驗證
+  - OPTIONS /items - CORS
+  - Schema validation - OpenAPI 規範驗證
+
+### OpenAPI 規範
+位置: `openapi/sparkboard.yaml`
+
+---
+
+## 3. 壓力測試 (Load Tests)
+
+### 安裝 k6
+
+#### Windows (Chocolatey)
+```bash
+choco install k6
+```
+
+#### Windows (直接下載)
+https://github.com/grafana/k6/releases
+
+#### Mac
+```bash
+brew install k6
+```
+
+### 執行方式
+```bash
+cd tests/k6
+
+# 基本執行
+k6 run items_get.js
+
+# 使用認證
+k6 run -e AUTH_TOKEN="your-jwt-token" items_get.js
+
+# 自訂場景
+k6 run --vus 10 --duration 30s items_get.js
+```
+
+### 效能目標
+- ✅ P95 latency < 200ms
+- ✅ Error rate < 5%
+- ✅ 支援 20 concurrent users
+
+---
+
+## 完整測試流程
+
+進入下一階段前執行：
+
+```bash
+# 1. 單元測試
+cd services/items
+npm test
+
+# 2. 契約測試
+cd ../../tests/contract
+npm install
+npm test
+
+# 3. 壓力測試（需先安裝 k6）
+cd ../k6
+k6 run items_get.js
+```
+
+---
+
 ## 驗收測試：Items CRUD 完整流程
 
 ### 前置準備

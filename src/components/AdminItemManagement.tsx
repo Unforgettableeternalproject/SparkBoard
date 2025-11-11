@@ -61,7 +61,9 @@ export function AdminItemManagement() {
   // Delete item mutation
   const deleteMutation = useMutation({
     mutationFn: async (item: SparkItem) => {
-      const response = await fetch(`${API_URL}/items/${encodeURIComponent(item.sk)}`, {
+      // Extract just the ID part if SK is in format ITEM#id
+      const skValue = item.sk.startsWith('ITEM#') ? item.sk.substring(5) : item.sk
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
         method: 'DELETE',
         headers: {
           Authorization: idToken || '',
@@ -79,13 +81,51 @@ export function AdminItemManagement() {
     },
   })
 
-  // Add annotation mutation (for now, just log it - you can extend this to save to DB)
+  // Add annotation mutation
+  const annotationMutation = useMutation({
+    mutationFn: async ({ item, note }: { item: SparkItem; note: string }) => {
+      const skValue = item.sk.startsWith('ITEM#') ? item.sk.substring(5) : item.sk
+      
+      // Get existing annotations or create new array
+      const existingAnnotations = item.annotations || []
+      const newAnnotation = {
+        id: `ANN#${Date.now()}`,
+        itemSk: item.sk,
+        adminId: idToken || '',
+        adminName: 'Admin', // TODO: Get from user context
+        content: note,
+        createdAt: new Date().toISOString()
+      }
+      
+      const updatedAnnotations = [...existingAnnotations, newAnnotation]
+      
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: idToken || '',
+        },
+        body: JSON.stringify({
+          annotations: updatedAnnotations
+        }),
+      })
+      
+      if (!response.ok) throw new Error('Failed to add annotation')
+      return response.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-items'] })
+      toast.success('Annotation added successfully')
+      setSelectedItem(null)
+      setAnnotation('')
+    },
+    onError: (error) => {
+      toast.error(`Failed to add annotation: ${error.message}`)
+    },
+  })
+
   const addAnnotation = (item: SparkItem, note: string) => {
-    // TODO: Implement annotation storage in backend
-    console.log('Adding annotation to item:', item.sk, 'Note:', note)
-    toast.success('Annotation added (feature coming soon)')
-    setSelectedItem(null)
-    setAnnotation('')
+    annotationMutation.mutate({ item, note })
   }
 
   const filteredItems = items.filter((item) => {

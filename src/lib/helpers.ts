@@ -5,6 +5,18 @@ export function formatDate(isoString: string): string {
   const date = new Date(isoString)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
+  
+  // If date is in the future, always show absolute date
+  if (diffMs < 0) {
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+  
   const diffMins = Math.floor(diffMs / 60000)
   
   if (diffMins < 1) return 'Just now'
@@ -16,7 +28,11 @@ export function formatDate(isoString: string): string {
   const diffDays = Math.floor(diffHours / 24)
   if (diffDays < 7) return `${diffDays}d ago`
   
-  return date.toLocaleDateString()
+  return date.toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  })
 }
 
 // File size formatting

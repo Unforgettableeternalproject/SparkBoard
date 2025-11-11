@@ -4,20 +4,85 @@ export interface User {
   name: string
   orgId: string
   'cognito:groups'?: string[]
+  role?: 'Admin' | 'Moderators' | 'Users'
+  avatarUrl?: string
+  bio?: string
 }
 
-export interface SparkItem {
+export interface UserProfile {
+  userId: string
+  email: string
+  name: string
+  bio?: string
+  avatar?: string
+  joinedAt: string
+  stats: {
+    tasksCreated: number
+    tasksCompleted: number
+    announcementsCreated: number
+  }
+}
+
+export interface Annotation {
+  id: string
+  itemSk: string
+  adminId: string
+  adminName: string
+  content: string
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface SubTask {
+  id: string
+  title: string
+  completed: boolean
+  completedAt?: string
+  completedBy?: string
+}
+
+export interface Task {
   id: string
   pk: string
   sk: string
-  type: 'task' | 'announcement'
+  type: 'task'
   title: string
   content: string
   createdAt: string
+  updatedAt?: string
   userId: string
   userName: string
+  status: 'active' | 'completed' | 'in-progress'
+  deadline?: string // ISO date string
+  subtasks: SubTask[]
+  completedAt?: string
+  archivedAt?: string // ISO date string - task archived date
+  archiveStatus?: 'aborted' | 'partial' | 'completed' | 'forced' // completion state when archived
+  hasBeenInProgress?: boolean // tracks if task ever had subtasks (prevents deletion)
   attachments?: FileAttachment[]
+  annotations?: Annotation[]
 }
+
+export interface Announcement {
+  id: string
+  pk: string
+  sk: string
+  type: 'announcement'
+  title: string
+  content: string
+  createdAt: string
+  updatedAt?: string
+  userId: string
+  userName: string
+  priority?: 'normal' | 'high' | 'urgent'
+  expiresAt?: string // ISO date string
+  isPinned?: boolean
+  pinnedUntil?: string // ISO date string - auto unpin after this date
+  attachments?: FileAttachment[]
+  annotations?: Annotation[]
+}
+
+export type SparkItem = Task | Announcement
 
 export interface FileAttachment {
   name: string
@@ -27,9 +92,24 @@ export interface FileAttachment {
   url?: string // S3 presigned URL for downloading
 }
 
-export interface CreateItemInput {
-  type: 'task' | 'announcement'
+export interface CreateTaskInput {
+  type: 'task'
   title: string
   content: string
+  deadline?: string
+  subtasks?: SubTask[]
   attachments?: FileAttachment[]
 }
+
+export interface CreateAnnouncementInput {
+  type: 'announcement'
+  title: string
+  content: string
+  priority?: 'normal' | 'high' | 'urgent'
+  expiresAt?: string
+  isPinned?: boolean
+  pinnedUntil?: string
+  attachments?: FileAttachment[]
+}
+
+export type CreateItemInput = CreateTaskInput | CreateAnnouncementInput

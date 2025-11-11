@@ -1,0 +1,538 @@
+openapi: 3.0.3
+info:
+  title: SparkBoard API
+  version: 1.0.0
+  description: |
+    SparkBoard API for managing tasks and announcements with role-based access control.
+    
+    **Authentication**: All endpoints require Cognito JWT token in Authorization header.
+    
+    **Roles**:
+    - Admin: Full access to all resources
+    - Moderators: Can create/delete announcements, manage own tasks
+    - Users: Can create/manage own tasks only
+
+servers:
+  - url: https://994mxyt7tl.execute-api.ap-northeast-1.amazonaws.com/prod
+    description: Production API
+
+security:
+  - CognitoAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /items:
+    get:
+      summary: List items with pagination
+      operationId: listItems
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Number of items to return
+        - name: nextToken
+          in: query
+          schema:
+            type: string
+          description: Pagination token from previous response
+      responses:
+        '200':
+          description: Successfully retrieved items
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - items
+                  - count
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Item'
+                  count:
+                    type: integer
+                    example: 20
+                  nextToken:
+                    type: string
+                    nullable: true
+                  hasMore:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      summary: Create a new item (task or announcement)
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/CreateTaskInput'
+                - $ref: '#/components/schemas/CreateAnnouncementInput'
+              discriminator:
+                propertyName: type
+                mapping:
+                  task: '#/components/schemas/CreateTaskInput'
+                  announcement: '#/components/schemas/CreateAnnouncementInput'
+      responses:
+        '201':
+          description: Item created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - item
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  item:
+                    $ref: '#/components/schemas/Item'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    options:
+      summary: CORS preflight
+      operationId: itemsOptions
+      security: []
+      responses:
+        '200':
+          description: CORS headers
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+
+  /items/{sk}:
+    delete:
+      summary: Delete an item
+      operationId: deleteItem
+      parameters:
+        - name: sk
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^ITEM#[a-zA-Z0-9-]+$'
+          description: Item sort key (e.g., ITEM#uuid)
+      responses:
+        '200':
+          description: Item deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                  - sk
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Item deleted successfully
+                  sk:
+                    type: string
+                    example: ITEM#123e4567-e89b-12d3-a456-426614174000
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/me:
+    get:
+      summary: Get current user information
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    CognitoAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito JWT token from Authorization header
+
+  schemas:
+    User:
+      type: object
+      required:
+        - userId
+        - username
+        - email
+      properties:
+        userId:
+          type: string
+          example: 123e4567-e89b-12d3-a456-426614174000
+        username:
+          type: string
+          example: johndoe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        orgId:
+          type: string
+          example: org-123
+        role:
+          type: string
+          enum: [Admin, Moderators, Users]
+          example: Users
+
+    Item:
+      type: object
+      required:
+        - id
+        - pk
+        - sk
+        - orgId
+        - userId
+        - userName
+        - title
+        - content
+        - type
+        - createdAt
+        - updatedAt
+        - attachments
+      properties:
+        id:
+          type: string
+          example: 123e4567-e89b-12d3-a456-426614174000
+        itemId:
+          type: string
+          example: 123e4567-e89b-12d3-a456-426614174000
+        pk:
+          type: string
+          example: ORG#org-123
+        sk:
+          type: string
+          example: ITEM#123e4567-e89b-12d3-a456-426614174000
+        orgId:
+          type: string
+          example: org-123
+        userId:
+          type: string
+          example: user-123
+        userName:
+          type: string
+          example: johndoe
+        username:
+          type: string
+          example: johndoe
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Complete project documentation
+        content:
+          type: string
+          maxLength: 5000
+          example: Write comprehensive docs for all API endpoints
+        type:
+          type: string
+          enum: [task, announcement]
+          example: task
+        status:
+          type: string
+          enum: [active, completed]
+          nullable: true
+          description: Only for tasks
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        createdAt:
+          type: string
+          format: date-time
+          example: '2025-10-29T12:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2025-10-29T12:00:00Z'
+        # Task-specific fields
+        subtasks:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SubTask'
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2025-12-31T23:59:59Z'
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        # Announcement-specific fields
+        priority:
+          type: string
+          enum: [normal, high, urgent]
+          nullable: true
+          default: normal
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2025-12-31T23:59:59Z'
+
+    SubTask:
+      type: object
+      required:
+        - id
+        - title
+        - completed
+      properties:
+        id:
+          type: string
+          example: st-123
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Design mockup
+        completed:
+          type: boolean
+          default: false
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedBy:
+          type: string
+          nullable: true
+          example: user-123
+
+    Attachment:
+      type: object
+      required:
+        - name
+        - size
+        - type
+      properties:
+        name:
+          type: string
+          example: document.pdf
+        size:
+          type: integer
+          minimum: 1
+          maximum: 5242880
+          example: 102400
+          description: File size in bytes (max 5MB)
+        type:
+          type: string
+          example: application/pdf
+        url:
+          type: string
+          format: uri
+          nullable: true
+          example: https://sparkboard-files.s3.amazonaws.com/document.pdf
+
+    CreateTaskInput:
+      type: object
+      required:
+        - title
+        - type
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Complete documentation
+        content:
+          type: string
+          maxLength: 5000
+          example: Write comprehensive API documentation
+        type:
+          type: string
+          enum: [task]
+          example: task
+        attachments:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/Attachment'
+        subtasks:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - title
+              - completed
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              completed:
+                type: boolean
+        deadline:
+          type: string
+          format: date-time
+          example: '2025-12-31T23:59:59Z'
+
+    CreateAnnouncementInput:
+      type: object
+      required:
+        - title
+        - type
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: System Maintenance
+        content:
+          type: string
+          maxLength: 5000
+          example: Scheduled maintenance on Friday
+        type:
+          type: string
+          enum: [announcement]
+          example: announcement
+        attachments:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/Attachment'
+        priority:
+          type: string
+          enum: [normal, high, urgent]
+          default: normal
+          example: high
+        expiresAt:
+          type: string
+          format: date-time
+          example: '2025-12-31T23:59:59Z'
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          example: ValidationError
+        message:
+          type: string
+          example: Title is required and must be a non-empty string
+        details:
+          type: string
+          nullable: true
+
+  responses:
+    BadRequest:
+      description: Bad request - validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: ValidationError
+            message: Title is required and must be a non-empty string
+
+    Unauthorized:
+      description: Unauthorized - missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Unauthorized
+            message: No valid authorization token provided
+
+    Forbidden:
+      description: Forbidden - insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Forbidden
+            message: Only moderators and admins can create announcements
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: NotFound
+            message: Item not found
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: InternalServerError
+            message: Failed to process request

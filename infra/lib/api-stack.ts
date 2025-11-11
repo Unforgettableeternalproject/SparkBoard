@@ -117,6 +117,38 @@ export class ApiStack extends cdk.Stack {
       tracing: lambda.Tracing.ACTIVE,
     });
 
+    // Users Lambda Function (for admin user management)
+    const usersFunction = new lambda.Function(this, 'UsersFunction', {
+      functionName: 'SparkBoard-Users',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/users')),
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 256,
+      environment: {
+        USER_POOL_ID: userPool.userPoolId,
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Grant Cognito permissions to users function
+    usersFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cognito-idp:ListUsers',
+        'cognito-idp:AdminListGroupsForUser',
+        'cognito-idp:AdminAddUserToGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminGetUser',
+        'cognito-idp:AdminDisableUser',
+        'cognito-idp:AdminEnableUser',
+        'cognito-idp:AdminDeleteUser',
+      ],
+      resources: [userPool.userPoolArn],
+    }));
+
     // Collect all functions for monitoring
     this.lambdaFunctions = [
       this.healthFunction,
@@ -124,6 +156,7 @@ export class ApiStack extends cdk.Stack {
       this.itemsFunction,
       this.uploadsFunction,
       this.monitoringFunction,
+      usersFunction,
     ];
 
     // Grant permissions
@@ -132,6 +165,16 @@ export class ApiStack extends cdk.Stack {
     table.grantReadWriteData(this.itemsFunction); // Items needs read/write access
     bucket.grantPut(this.uploadsFunction); // Uploads can generate presigned PUT URLs
     bucket.grantRead(this.uploadsFunction); // Uploads can also read for validation
+
+    // Grant Cognito permissions to auth function for updating user attributes
+    this.authFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cognito-idp:AdminUpdateUserAttributes',
+        'cognito-idp:AdminGetUser',
+      ],
+      resources: [userPool.userPoolArn],
+    }));
 
     // API Gateway REST API
     this.api = new apigateway.RestApi(this, 'SparkBoardApi', {
@@ -198,6 +241,18 @@ export class ApiStack extends cdk.Stack {
       }
     );
 
+    // PATCH /auth/me (requires Cognito JWT) - Update user profile
+    authMeResource.addMethod(
+      'PATCH',
+      new apigateway.LambdaIntegration(this.authFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
     // Items endpoints - /items
     const itemsResource = this.api.root.addResource('items');
     
@@ -229,6 +284,18 @@ export class ApiStack extends cdk.Stack {
     const itemBySkResource = itemsResource.addResource('{sk}');
     itemBySkResource.addMethod(
       'DELETE',
+      new apigateway.LambdaIntegration(this.itemsFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // PATCH /items/{sk} (requires Cognito JWT) - Update task/announcement
+    itemBySkResource.addMethod(
+      'PATCH',
       new apigateway.LambdaIntegration(this.itemsFunction, {
         proxy: true,
       }),
@@ -288,6 +355,85 @@ export class ApiStack extends cdk.Stack {
     alarmsResource.addMethod(
       'GET',
       new apigateway.LambdaIntegration(this.monitoringFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // Users endpoints - /users/* (Admin only)
+    const usersResource = this.api.root.addResource('users');
+    
+    // GET /users (requires Cognito JWT + Admin role)
+    usersResource.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/add-to-group (requires Cognito JWT + Admin role)
+    const addToGroupResource = usersResource.addResource('add-to-group');
+    addToGroupResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/remove-from-group (requires Cognito JWT + Admin role)
+    const removeFromGroupResource = usersResource.addResource('remove-from-group');
+    removeFromGroupResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/disable (requires Cognito JWT + Admin role)
+    const disableUserResource = usersResource.addResource('disable');
+    disableUserResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/enable (requires Cognito JWT + Admin role)
+    const enableUserResource = usersResource.addResource('enable');
+    enableUserResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // DELETE /users (requires Cognito JWT + Admin role)
+    usersResource.addMethod(
+      'DELETE',
+      new apigateway.LambdaIntegration(usersFunction, {
         proxy: true,
       }),
       {

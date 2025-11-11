@@ -7,8 +7,9 @@
  */
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
+const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('./permissions');
 
 // Initialize DynamoDB client
 const client = new DynamoDBClient({});
@@ -20,41 +21,6 @@ const docClient = DynamoDBDocumentClient.from(client, {
 });
 
 const TABLE_NAME = process.env.TABLE_NAME;
-
-/**
- * Helper function to create API response
- */
-function createResponse(statusCode, body) {
-  return {
-    statusCode,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    },
-    body: JSON.stringify(body),
-  };
-}
-
-/**
- * Extract user info from Cognito authorizer
- */
-function getUserFromEvent(event) {
-  const authorizer = event.requestContext?.authorizer;
-  if (!authorizer || !authorizer.claims) {
-    return null;
-  }
-
-  const claims = authorizer.claims;
-  return {
-    userId: claims.sub,
-    username: claims['cognito:username'] || claims.username,
-    email: claims.email,
-    orgId: claims['custom:orgId'] || 'sparkboard-demo',
-    groups: claims['cognito:groups'] ? claims['cognito:groups'].split(',') : [],
-  };
-}
 
 /**
  * POST /items - Create a new item
@@ -83,12 +49,15 @@ async function createItem(event) {
     }
 
     // Validate required fields
-    const { title, content, type, attachments } = body;
+    const { title, content, type, attachments, subtasks, deadline, priority, expiresAt, isPinned, pinnedUntil } = body;
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return createResponse(400, {
-        error: 'ValidationError',
-        message: 'Title is required and must be a non-empty string',
-      });
+      return createErrorResponse(400, 'ValidationError', 'Title is required and must be a non-empty string');
+    }
+
+    // Check permissions based on type
+    const itemType = type || 'task';
+    if (itemType === 'announcement' && !checkPermission(user, 'create:announcement')) {
+      return createErrorResponse(403, 'Forbidden', 'Only moderators and admins can create announcements');
     }
 
     // Generate IDs and timestamps
@@ -122,13 +91,24 @@ async function createItem(event) {
       
       title: title.trim(),
       content: content?.trim() || '',
-      type: type || 'task', // task, announcement, etc.
-      status: 'active',
+      type: itemType,
       attachments: attachments || [],
       
       createdAt,
       updatedAt: createdAt,
     };
+
+    // Add type-specific fields
+    if (itemType === 'task') {
+      item.status = 'active';
+      item.subtasks = subtasks || [];
+      if (deadline) item.deadline = deadline;
+    } else if (itemType === 'announcement') {
+      item.priority = priority || 'normal';
+      if (expiresAt) item.expiresAt = expiresAt;
+      if (isPinned !== undefined) item.isPinned = isPinned;
+      if (pinnedUntil) item.pinnedUntil = pinnedUntil;
+    }
 
     // Save to DynamoDB
     const command = new PutCommand({
@@ -158,6 +138,15 @@ async function createItem(event) {
         attachments: item.attachments,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
+        // Task-specific fields
+        subtasks: item.subtasks,
+        deadline: item.deadline,
+        completedAt: item.completedAt,
+        // Announcement-specific fields
+        priority: item.priority,
+        expiresAt: item.expiresAt,
+        isPinned: item.isPinned,
+        pinnedUntil: item.pinnedUntil,
       },
     });
   } catch (error) {
@@ -243,6 +232,19 @@ async function getItems(event) {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       attachments: item.attachments,
+      annotations: item.annotations,
+      // Task-specific fields
+      subtasks: item.subtasks,
+      deadline: item.deadline,
+      completedAt: item.completedAt,
+      archivedAt: item.archivedAt,
+      archiveStatus: item.archiveStatus,
+      hasBeenInProgress: item.hasBeenInProgress,
+      // Announcement-specific fields
+      priority: item.priority,
+      expiresAt: item.expiresAt,
+      isPinned: item.isPinned,
+      pinnedUntil: item.pinnedUntil,
     }));
 
     // Generate next token if there are more results
@@ -288,46 +290,43 @@ async function deleteItem(event) {
     }
 
     // Extract item SK from path parameters
-    const sk = event.pathParameters?.sk;
-    if (!sk) {
-      return createResponse(400, {
-        error: 'BadRequest',
-        message: 'Item SK is required',
-      });
+    const skParam = event.pathParameters?.sk;
+    if (!skParam) {
+      return createErrorResponse(400, 'BadRequest', 'Item SK is required');
     }
 
-    // Check if user is admin
-    const groups = user.groups || [];
-    const isAdmin = groups.includes('Admin');
+    // Normalize SK format - add ITEM# prefix if not present
+    const sk = skParam.startsWith('ITEM#') ? skParam : `ITEM#${skParam}`;
 
-    // If not admin, verify the item belongs to the user
-    if (!isAdmin) {
-      // First, query the item to check ownership
-      const queryCommand = new QueryCommand({
-        TableName: TABLE_NAME,
-        KeyConditionExpression: 'PK = :pk AND SK = :sk',
-        ExpressionAttributeValues: {
-          ':pk': `ORG#${user.orgId}`,
-          ':sk': sk,
-        },
-      });
+    // Query the item to check ownership and type
+    const queryCommand = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND SK = :sk',
+      ExpressionAttributeValues: {
+        ':pk': `ORG#${user.orgId}`,
+        ':sk': sk,
+      },
+    });
 
-      const queryResult = await docClient.send(queryCommand);
-      
-      if (!queryResult.Items || queryResult.Items.length === 0) {
-        return createResponse(404, {
-          error: 'NotFound',
-          message: 'Item not found',
-        });
-      }
+    const queryResult = await docClient.send(queryCommand);
+    
+    if (!queryResult.Items || queryResult.Items.length === 0) {
+      return createErrorResponse(404, 'NotFound', 'Item not found');
+    }
 
-      const item = queryResult.Items[0];
-      if (item.userId !== user.userId) {
-        return createResponse(403, {
-          error: 'Forbidden',
-          message: 'You do not have permission to delete this item',
-        });
-      }
+    const item = queryResult.Items[0];
+    
+    // Check permissions based on item type and ownership
+    const action = item.type === 'announcement' ? 'delete:announcement' : 'delete:task';
+    const resource = { userId: item.userId };
+    
+    if (!checkPermission(user, action, resource)) {
+      return createErrorResponse(403, 'Forbidden', 'You do not have permission to delete this item');
+    }
+
+    // For tasks: only allow deletion if task has never been in progress (no subtasks history)
+    if (item.type === 'task' && item.hasBeenInProgress) {
+      return createErrorResponse(400, 'BadRequest', 'Cannot delete task that has been in progress. Please archive it instead.');
     }
 
     // Delete the item
@@ -359,6 +358,317 @@ async function deleteItem(event) {
 }
 
 /**
+ * PATCH /items/:sk - Update an item (task status, subtasks completion)
+ */
+async function updateItem(event) {
+  console.log('Updating item:', JSON.stringify(event, null, 2));
+
+  try {
+    const user = getUserFromEvent(event);
+    if (!user) {
+      return createErrorResponse(401, 'Unauthorized', 'No valid authorization token provided');
+    }
+
+    // Extract item SK from path parameters
+    const skParam = event.pathParameters?.sk;
+    if (!skParam) {
+      return createErrorResponse(400, 'BadRequest', 'Item SK is required');
+    }
+
+    // Ensure SK has ITEM# prefix (handle both formats: "ITEM#xxx" and "xxx")
+    const sk = skParam.startsWith('ITEM#') ? skParam : `ITEM#${skParam}`;
+
+    // Parse request body
+    const body = JSON.parse(event.body || '{}');
+
+    // Query the item to check ownership and type
+    const queryCommand = new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk AND SK = :sk',
+      ExpressionAttributeValues: {
+        ':pk': `ORG#${user.orgId}`,
+        ':sk': sk,
+      },
+    });
+
+    const queryResult = await docClient.send(queryCommand);
+    
+    if (!queryResult.Items || queryResult.Items.length === 0) {
+      return createErrorResponse(404, 'NotFound', 'Item not found');
+    }
+
+    const item = queryResult.Items[0];
+    
+    // Check permissions - only owner or admin can update
+    const action = item.type === 'announcement' ? 'update:announcement' : 'update:task';
+    const resource = { userId: item.userId };
+    
+    if (!checkPermission(user, action, resource)) {
+      return createErrorResponse(403, 'Forbidden', 'You do not have permission to update this item');
+    }
+
+    // Prepare update expression
+    const setExpressions = [];
+    const removeExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    let counter = 0;
+
+    // Update task-specific fields
+    let statusUpdated = false;
+    let completedAtSet = false;
+    let newStatus = item.status;
+
+    if (item.type === 'task') {
+      // Track if task has ever been in progress (has/had subtasks)
+      let shouldMarkInProgress = false;
+      
+      // Check subtasks first to determine auto-completion
+      let shouldAutoComplete = false;
+      if (body.subtasks !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'subtasks';
+        expressionAttributeValues[`:val${counter}`] = body.subtasks;
+
+        // Mark as having been in progress if subtasks are added
+        if (body.subtasks.length > 0 && !item.hasBeenInProgress) {
+          shouldMarkInProgress = true;
+        }
+
+        // Auto-complete task if all subtasks are completed
+        const allCompleted = body.subtasks.every(st => st.completed);
+        const anyIncomplete = body.subtasks.some(st => !st.completed);
+        
+        if (allCompleted && body.subtasks.length > 0) {
+          shouldAutoComplete = true;
+          newStatus = 'completed';
+        } else if (anyIncomplete && item.status === 'completed') {
+          // If task was completed but now has incomplete subtasks, revert to in-progress
+          newStatus = 'in-progress';
+        }
+      }
+
+      // Set hasBeenInProgress flag
+      if (shouldMarkInProgress) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'hasBeenInProgress';
+        expressionAttributeValues[`:val${counter}`] = true;
+      }
+
+      // Handle explicit status update (overrides auto-completion)
+      if (body.status !== undefined) {
+        newStatus = body.status;
+      }
+
+      // Apply status update if changed
+      if (newStatus !== item.status) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'status';
+        expressionAttributeValues[`:val${counter}`] = newStatus;
+        statusUpdated = true;
+
+        // Set completedAt when transitioning to completed
+        if (newStatus === 'completed' && !item.completedAt) {
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+          completedAtSet = true;
+        } else if (newStatus !== 'completed' && item.completedAt) {
+          // Remove completedAt if moving away from completed status
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+        }
+      }
+
+      if (body.deadline !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'deadline';
+        expressionAttributeValues[`:val${counter}`] = body.deadline;
+      }
+
+      // Handle archiving with status calculation
+      if (body.archivedAt !== undefined) {
+        if (body.archivedAt) {
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archivedAt';
+          expressionAttributeValues[`:val${counter}`] = body.archivedAt;
+
+          // Calculate archive status
+          let archiveStatus;
+          const forcedByAdmin = body.forcedArchive === true;
+          
+          if (forcedByAdmin) {
+            archiveStatus = 'forced';
+          } else {
+            const currentSubtasks = body.subtasks !== undefined ? body.subtasks : item.subtasks || [];
+            
+            if (!currentSubtasks || currentSubtasks.length === 0) {
+              // No subtasks: completed if status is completed, otherwise aborted
+              archiveStatus = (body.status || item.status) === 'completed' ? 'completed' : 'aborted';
+            } else {
+              const completedCount = currentSubtasks.filter(st => st.completed).length;
+              if (completedCount === 0) {
+                archiveStatus = 'aborted';
+              } else if (completedCount === currentSubtasks.length) {
+                archiveStatus = 'completed';
+              } else {
+                archiveStatus = 'partial';
+              }
+            }
+          }
+
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archiveStatus';
+          expressionAttributeValues[`:val${counter}`] = archiveStatus;
+        } else {
+          // Unarchive - remove both archivedAt and archiveStatus
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archivedAt';
+          
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archiveStatus';
+        }
+      }
+    }
+
+    // Update announcement-specific fields
+    if (item.type === 'announcement') {
+      if (body.priority !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'priority';
+        expressionAttributeValues[`:val${counter}`] = body.priority;
+      }
+
+      if (body.expiresAt !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'expiresAt';
+        expressionAttributeValues[`:val${counter}`] = body.expiresAt;
+      }
+
+      if (body.isPinned !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'isPinned';
+        expressionAttributeValues[`:val${counter}`] = body.isPinned;
+      }
+
+      if (body.pinnedUntil !== undefined) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'pinnedUntil';
+        expressionAttributeValues[`:val${counter}`] = body.pinnedUntil;
+      }
+    }
+
+    // Update common fields
+    if (body.title !== undefined) {
+      counter++;
+      setExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'title';
+      expressionAttributeValues[`:val${counter}`] = body.title;
+    }
+
+    if (body.content !== undefined) {
+      counter++;
+      setExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'content';
+      expressionAttributeValues[`:val${counter}`] = body.content;
+    }
+
+    // Update annotations (for admin notes)
+    if (body.annotations !== undefined) {
+      counter++;
+      setExpressions.push(`#attr${counter} = :val${counter}`);
+      expressionAttributeNames[`#attr${counter}`] = 'annotations';
+      expressionAttributeValues[`:val${counter}`] = body.annotations;
+    }
+
+    // Always update updatedAt
+    counter++;
+    setExpressions.push(`#attr${counter} = :val${counter}`);
+    expressionAttributeNames[`#attr${counter}`] = 'updatedAt';
+    expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+
+    if (setExpressions.length === 0 && removeExpressions.length === 0) {
+      return createErrorResponse(400, 'BadRequest', 'No valid fields to update');
+    }
+
+    // Build UpdateExpression with both SET and REMOVE operations
+    let updateExpression = '';
+    if (setExpressions.length > 0) {
+      updateExpression += `SET ${setExpressions.join(', ')}`;
+    }
+    if (removeExpressions.length > 0) {
+      if (updateExpression) updateExpression += ' ';
+      updateExpression += `REMOVE ${removeExpressions.join(', ')}`;
+    }
+
+    // Update the item in DynamoDB
+    const updateCommand = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `ORG#${user.orgId}`,
+        SK: sk,
+      },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
+    });
+
+    const updateResult = await docClient.send(updateCommand);
+
+    console.log('Item updated successfully:', sk);
+
+    return createResponse(200, {
+      success: true,
+      message: 'Item updated successfully',
+      item: {
+        id: updateResult.Attributes.itemId,
+        pk: updateResult.Attributes.pk,
+        sk: updateResult.Attributes.sk,
+        orgId: updateResult.Attributes.orgId,
+        userId: updateResult.Attributes.userId,
+        userName: updateResult.Attributes.username,
+        title: updateResult.Attributes.title,
+        content: updateResult.Attributes.content,
+        type: updateResult.Attributes.type,
+        status: updateResult.Attributes.status,
+        attachments: updateResult.Attributes.attachments,
+        createdAt: updateResult.Attributes.createdAt,
+        updatedAt: updateResult.Attributes.updatedAt,
+        subtasks: updateResult.Attributes.subtasks,
+        deadline: updateResult.Attributes.deadline,
+        completedAt: updateResult.Attributes.completedAt,
+        priority: updateResult.Attributes.priority,
+        expiresAt: updateResult.Attributes.expiresAt,
+        isPinned: updateResult.Attributes.isPinned,
+        pinnedUntil: updateResult.Attributes.pinnedUntil,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating item:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to update item',
+      details: error.message,
+    });
+  }
+}
+
+/**
  * Main Lambda handler
  */
 exports.handler = async (event) => {
@@ -376,6 +686,8 @@ exports.handler = async (event) => {
         return await createItem(event);
       case 'GET':
         return await getItems(event);
+      case 'PATCH':
+        return await updateItem(event);
       case 'DELETE':
         return await deleteItem(event);
       case 'OPTIONS':
