@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { getAvatarColor } from '@/lib/avatar-utils'
 import {
   User as UserIcon,
   Envelope,
@@ -75,17 +76,6 @@ export function ProfilePage() {
     const activeTasks = tasks.filter(task => task.status === 'active' && !task.archivedAt)
     const archivedTasks = tasks.filter(task => task.archivedAt)
     const announcements = userItems.filter(item => item.type === 'announcement')
-
-    // Debug: Log statistics calculation
-    console.log('[ProfilePage] Stats calculation:', {
-      userId: user.id,
-      totalItemsInOrg: items.length,
-      userItems: userItems.length,
-      tasks: tasks.length,
-      completedTasks: completedTasks.length,
-      activeTasks: activeTasks.length,
-      announcements: announcements.length
-    })
 
     return {
       tasksCreated: tasks.length,
@@ -265,17 +255,39 @@ export function ProfilePage() {
       console.log('[ProfilePage] Upload successful, public URL:', publicUrl)
       setAvatarUrl(publicUrl)
       
-      // Save avatar URL to user profile in backend
+      // Save avatar URL to user profile in backend (include all fields to prevent clearing)
       console.log('[ProfilePage] Saving avatar URL to backend:', publicUrl)
-      await saveProfileToBackend({ avatarUrl: publicUrl })
+      await saveProfileToBackend({ 
+        name: name.trim(),
+        email: email.trim(),
+        bio: bio.trim(),
+        avatarUrl: publicUrl 
+      })
       console.log('[ProfilePage] Avatar URL saved to backend')
       
-      // Refresh user data to update avatar in navbar
+      // Wait longer for DynamoDB eventual consistency
+      console.log('[ProfilePage] Waiting 1.5s for backend propagation...')
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+      // Refresh user data to update avatar in navbar with retry
       console.log('[ProfilePage] Calling refreshUser, exists:', !!refreshUser)
       if (refreshUser) {
-        console.log('[ProfilePage] About to call refreshUser()')
-        const result = await refreshUser()
-        console.log('[ProfilePage] refreshUser result:', result)
+        let attempts = 0
+        let success = false
+        
+        // Try up to 3 times with delays
+        while (attempts < 3 && !success) {
+          attempts++
+          console.log('[ProfilePage] refreshUser attempt', attempts)
+          success = await refreshUser()
+          
+          if (!success && attempts < 3) {
+            console.log('[ProfilePage] Retry in 1s...')
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+        }
+        
+        console.log('[ProfilePage] refreshUser completed after', attempts, 'attempts, success:', success)
       } else {
         console.warn('[ProfilePage] refreshUser function not available')
       }
@@ -317,9 +329,26 @@ export function ProfilePage() {
         ...(avatarUrl && { avatarUrl })
       })
       
-      // Refresh user data to update navbar
+      // Wait for backend to propagate changes
+      console.log('[ProfilePage] Waiting 1s for backend propagation...')
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Refresh user data to update navbar with retry
       if (refreshUser) {
-        await refreshUser()
+        let attempts = 0
+        let success = false
+        
+        while (attempts < 3 && !success) {
+          attempts++
+          console.log('[ProfilePage] refreshUser attempt', attempts)
+          success = await refreshUser()
+          
+          if (!success && attempts < 3) {
+            await new Promise(resolve => setTimeout(resolve, 800))
+          }
+        }
+        
+        console.log('[ProfilePage] Profile refresh completed after', attempts, 'attempts')
       }
       
       // Show warning if email verification is needed
@@ -365,6 +394,7 @@ export function ProfilePage() {
     .toUpperCase()
     .slice(0, 2)
 
+  const avatarColor = getAvatarColor(user.id)
   const userRole = user['cognito:groups']?.[0] || 'Users'
   const canCreateAnnouncement = user['cognito:groups']?.includes('Admin') || user['cognito:groups']?.includes('Moderators')
   
@@ -403,8 +433,8 @@ export function ProfilePage() {
             <div className="flex flex-col items-center space-y-4">
               <div className="relative group">
                 <Avatar className="h-24 w-24">
-                  {avatarUrl && <AvatarImage src={avatarUrl} alt={user.name} />}
-                  <AvatarFallback className="text-2xl bg-primary text-primary-foreground">
+                  {avatarUrl && <AvatarImage src={avatarUrl} alt={user.name} key={avatarUrl} />}
+                  <AvatarFallback className={`text-2xl ${avatarColor} text-white`}>
                     {initials}
                   </AvatarFallback>
                 </Avatar>

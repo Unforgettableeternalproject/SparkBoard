@@ -23,6 +23,7 @@ function App() {
     isAuthenticated, 
     isLoading, 
     requiresPasswordChange,
+    avatarVersion,
     login, 
     logout,
     register,
@@ -134,7 +135,7 @@ function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-background flex flex-col">
-        <Header user={user!} onLogout={logout} items={items || []} />
+        <Header user={user!} onLogout={logout} items={items || []} avatarVersion={avatarVersion} />
         <PinnedAnnouncementBanner announcements={items || []} />
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar - Hidden on mobile, visible on desktop */}

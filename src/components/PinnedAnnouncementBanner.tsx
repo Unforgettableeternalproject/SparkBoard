@@ -51,28 +51,20 @@ export function PinnedAnnouncementBanner({ announcements }: PinnedAnnouncementBa
   // Auto-rotate announcements every 5 seconds
   useEffect(() => {
     if (pinnedAnnouncements.length <= 1) {
-      console.log('[PinnedBanner] No rotation needed, count:', pinnedAnnouncements.length)
       return
     }
 
-    console.log('[PinnedBanner] Starting rotation for', pinnedAnnouncements.length, 'announcements')
     const interval = setInterval(() => {
-      setCurrentIndex((prev) => {
-        const next = (prev + 1) % pinnedAnnouncements.length
-        console.log('[PinnedBanner] Rotating from', prev, 'to', next)
-        return next
-      })
+      setCurrentIndex((prev) => (prev + 1) % pinnedAnnouncements.length)
     }, 5000)
 
     return () => {
-      console.log('[PinnedBanner] Stopping rotation')
       clearInterval(interval)
     }
   }, [pinnedAnnouncements.length])
 
   // Reset index when announcements change
   useEffect(() => {
-    console.log('[PinnedBanner] Resetting index, announcements count:', pinnedAnnouncements.length)
     setCurrentIndex(0)
   }, [pinnedAnnouncements.length])
 
@@ -89,12 +81,10 @@ export function PinnedAnnouncementBanner({ announcements }: PinnedAnnouncementBa
   }
 
   if (pinnedAnnouncements.length === 0) {
-    console.log('[PinnedBanner] No pinned announcements to display')
     return null
   }
 
   const currentAnnouncement = pinnedAnnouncements[currentIndex]
-  console.log('[PinnedBanner] Displaying announcement', currentIndex + 1, 'of', pinnedAnnouncements.length, ':', currentAnnouncement.title)
 
   const getPriorityColor = (priority?: string) => {
     switch (priority) {

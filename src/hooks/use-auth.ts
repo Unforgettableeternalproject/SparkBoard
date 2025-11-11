@@ -43,6 +43,7 @@ export function useAuth() {
   const [isLoading, setIsLoading] = useState(true)
   const [idToken, setIdToken] = useState<string | null>(null)
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
+  const [avatarVersion, setAvatarVersion] = useState(0)
   const cognitoUserForPasswordChangeRef = useRef<CognitoUser | null>(null)
 
   // Save ID token to localStorage
@@ -409,23 +410,35 @@ export function useAuth() {
         if (data.user) {
           console.log('[use-auth] About to update user state...')
           // Update user state with profile data from backend
+          // Create a completely new object to ensure React detects the change
           setUser(prevUser => {
             console.log('[use-auth] Inside setUser callback, prevUser:', prevUser)
             if (!prevUser) {
               console.warn('[use-auth] prevUser is null, cannot update')
               return null
             }
+            
+            // Add timestamp to avatarUrl to bust cache
+            let avatarUrlWithCache = data.user.avatarUrl
+            if (avatarUrlWithCache) {
+              const timestamp = Date.now()
+              const separator = avatarUrlWithCache.includes('?') ? '&' : '?'
+              avatarUrlWithCache = `${avatarUrlWithCache}${separator}t=${timestamp}`
+              console.log('[use-auth] Avatar URL with cache buster:', avatarUrlWithCache)
+            }
+            
             const updatedUser = {
               ...prevUser,
               name: data.user.name || prevUser.name,
               email: data.user.email || prevUser.email,
-              avatarUrl: data.user.avatarUrl,
+              avatarUrl: avatarUrlWithCache,
               bio: data.user.bio,
             }
             console.log('[use-auth] Updated user state:', updatedUser)
             return updatedUser
           })
-          console.log('[use-auth] setUser called successfully')
+          
+          console.log('[use-auth] setUser updated with cache-busted avatar')
           return true
         } else {
           console.warn('[use-auth] No user data in response')
@@ -583,6 +596,7 @@ export function useAuth() {
     isLoading,
     idToken,
     requiresPasswordChange,
+    avatarVersion,
     login,
     logout,
     register,

@@ -57,6 +57,7 @@ async function getUserProfile(userId, orgId) {
         PK: `ORG#${orgId}`,
         SK: `USER#${userId}`,
       },
+      ConsistentRead: true, // Use strongly consistent read to get latest data
     });
 
     const result = await docClient.send(command);

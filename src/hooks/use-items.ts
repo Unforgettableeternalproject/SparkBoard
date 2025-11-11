@@ -85,16 +85,13 @@ export function useItems(user: User | null) {
     fetchItems(false)
     
     // Setup polling interval
-    console.log('[use-items] Setting up polling interval (30s)')
     pollingIntervalRef.current = setInterval(() => {
-      console.log('[use-items] Polling for updates...')
       fetchItems(true)
     }, POLLING_INTERVAL)
     
     // Cleanup on unmount
     return () => {
       if (pollingIntervalRef.current) {
-        console.log('[use-items] Clearing polling interval')
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
       }
