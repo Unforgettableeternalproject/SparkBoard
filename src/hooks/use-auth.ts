@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   CognitoUserPool,
   CognitoUser,
@@ -42,6 +42,8 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [idToken, setIdToken] = useState<string | null>(null)
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
+  const cognitoUserForPasswordChangeRef = useRef<CognitoUser | null>(null)
 
   // Save ID token to localStorage
   const saveIdToken = (token: string | null) => {
@@ -55,6 +57,69 @@ export function useAuth() {
 
   // Check for existing session on mount
   useEffect(() => {
+    // First check for OAuth tokens in localStorage (from Hosted UI login)
+    const storedIdToken = localStorage.getItem('cognito_id_token')
+    const storedAccessToken = localStorage.getItem('cognito_access_token')
+    const storedRefreshToken = localStorage.getItem('cognito_refresh_token')
+    
+    if (storedIdToken && storedAccessToken && storedRefreshToken) {
+      try {
+        // Decode and validate ID token
+        const idTokenPayload = JSON.parse(atob(storedIdToken.split('.')[1]))
+        const expiration = idTokenPayload.exp * 1000 // Convert to milliseconds
+        
+        if (expiration > Date.now()) {
+          // Token is still valid, restore user session
+          const groups = idTokenPayload['cognito:groups'] || []
+          const role = groups.includes('Admin') 
+            ? 'Admin' 
+            : groups.includes('Moderators') 
+            ? 'Moderators' 
+            : 'Users'
+          
+          const user: User = {
+            id: idTokenPayload.sub,
+            email: idTokenPayload.email,
+            name: idTokenPayload.name || idTokenPayload['cognito:username'],
+            orgId: idTokenPayload['custom:orgId'] || 'ORG#sparkboard-demo',
+            'cognito:groups': groups,
+            role,
+          }
+          
+          setUser(user)
+          saveIdToken(storedIdToken)
+          
+          // Load profile data from backend API
+          fetch(`${import.meta.env.VITE_API_URL}/auth/me`, {
+            method: 'GET',
+            headers: { 'Authorization': storedIdToken },
+          })
+            .then(response => response.ok ? response.json() : null)
+            .then(data => {
+              if (data?.user) {
+                setUser(prevUser => {
+                  if (!prevUser) return null
+                  return {
+                    ...prevUser,
+                    name: data.user.name || prevUser.name,
+                    email: data.user.email || prevUser.email,
+                    avatarUrl: data.user.avatarUrl,
+                    bio: data.user.bio,
+                  }
+                })
+              }
+            })
+            .catch(error => console.error('Failed to load profile on mount:', error))
+            .finally(() => setIsLoading(false))
+          
+          return
+        }
+      } catch (error) {
+        console.error('Failed to restore OAuth session:', error)
+      }
+    }
+    
+    // Fallback to checking Cognito SDK session
     const cognitoUser = userPool.getCurrentUser()
     
     if (cognitoUser) {
@@ -128,6 +193,8 @@ export function useAuth() {
           const user = sessionToUser(session, email)
           const token = session.getIdToken().getJwtToken()
           
+          setRequiresPasswordChange(false)
+          cognitoUserForPasswordChangeRef.current = null
           setUser(user)
           saveIdToken(token)
           
@@ -168,7 +235,20 @@ export function useAuth() {
           console.error('Login failed:', err)
           setUser(null)
           saveIdToken(null)
+          setRequiresPasswordChange(false)
+          cognitoUserForPasswordChangeRef.current = null
           resolve(false)
+        },
+        newPasswordRequired: (userAttributes, requiredAttributes) => {
+          console.log('New password required', { userAttributes, requiredAttributes })
+          // Store cognito user reference first
+          cognitoUserForPasswordChangeRef.current = cognitoUser
+          // Use setTimeout to ensure state update happens after callback completes
+          setTimeout(() => {
+            setRequiresPasswordChange(true)
+          }, 0)
+          // Resolve to indicate password change is required (not an error)
+          resolve(true)
         },
       })
     })
@@ -181,8 +261,14 @@ export function useAuth() {
       cognitoUser.signOut()
     }
     
+    // Clear OAuth tokens
+    localStorage.removeItem('cognito_access_token')
+    localStorage.removeItem('cognito_refresh_token')
+    
     setUser(null)
     saveIdToken(null)
+    setRequiresPasswordChange(false)
+    cognitoUserForPasswordChangeRef.current = null
   }
 
   // Hosted UI Login
@@ -228,6 +314,18 @@ export function useAuth() {
       // Decode ID token to get user info
       const idTokenPayload = JSON.parse(atob(tokens.id_token.split('.')[1]))
       
+      // Create Cognito session to persist login
+      const username = idTokenPayload['cognito:username'] || idTokenPayload.email
+      const cognitoUser = new CognitoUser({
+        Username: username,
+        Pool: userPool,
+      })
+
+      // Store tokens in local storage for session persistence
+      localStorage.setItem('cognito_id_token', tokens.id_token)
+      localStorage.setItem('cognito_access_token', tokens.access_token)
+      localStorage.setItem('cognito_refresh_token', tokens.refresh_token)
+      
       const groups = idTokenPayload['cognito:groups'] || []
       const role = groups.includes('Admin') 
         ? 'Admin' 
@@ -244,6 +342,8 @@ export function useAuth() {
         role,
       }
 
+      setRequiresPasswordChange(false)
+      cognitoUserForPasswordChangeRef.current = null
       setUser(user)
       saveIdToken(tokens.id_token)
       
@@ -341,15 +441,156 @@ export function useAuth() {
     }
   }
 
+  // Complete password change for users with temporary passwords
+  const completeNewPasswordChallenge = (newPassword: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const cognitoUser = cognitoUserForPasswordChangeRef.current
+      if (!cognitoUser) {
+        console.error('No cognito user for password change')
+        resolve(false)
+        return
+      }
+
+      cognitoUser.completeNewPasswordChallenge(
+        newPassword,
+        {},
+        {
+          onSuccess: async (session: CognitoUserSession) => {
+            try {
+              const user = sessionToUser(session, cognitoUser.getUsername())
+              const token = session.getIdToken().getJwtToken()
+              
+              // Load profile data from backend API first (before any state updates)
+              let finalUser = user
+              const apiUrl = import.meta.env.VITE_API_URL
+              if (apiUrl) {
+                try {
+                  const response = await fetch(`${apiUrl}/auth/me`, {
+                    method: 'GET',
+                    headers: {
+                      'Authorization': token,
+                    },
+                  })
+
+                  if (response.ok) {
+                    const data = await response.json()
+                    if (data.user) {
+                      finalUser = {
+                        ...user,
+                        name: data.user.name || user.name,
+                        email: data.user.email || user.email,
+                        avatarUrl: data.user.avatarUrl,
+                        bio: data.user.bio,
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error('Failed to load profile after password change:', error)
+                }
+              }
+              
+              // Use setTimeout to break out of the callback execution context
+              setTimeout(() => {
+                setRequiresPasswordChange(false)
+                cognitoUserForPasswordChangeRef.current = null
+                setUser(finalUser)
+                saveIdToken(token)
+              }, 0)
+              
+              resolve(true)
+            } catch (error) {
+              console.error('Failed to complete password change:', error)
+              resolve(false)
+            }
+          },
+          onFailure: (err) => {
+            console.error('Password change failed:', err)
+            resolve(false)
+          },
+        }
+      )
+    })
+  }
+
+  // Register new user
+  const register = (username: string, email: string, password: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const attributeList = [
+        new CognitoUserAttribute({
+          Name: 'email',
+          Value: email,
+        }),
+      ]
+
+      userPool.signUp(username, password, attributeList, [], (err, result) => {
+        if (err) {
+          console.error('Registration failed:', err)
+          resolve(false)
+          return
+        }
+
+        console.log('Registration successful:', result)
+        resolve(true)
+      })
+    })
+  }
+
+  // Verify email with confirmation code
+  const verifyEmail = (username: string, code: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const cognitoUser = new CognitoUser({
+        Username: username,
+        Pool: userPool,
+      })
+
+      cognitoUser.confirmRegistration(code, true, (err, result) => {
+        if (err) {
+          console.error('Email verification failed:', err)
+          resolve(false)
+          return
+        }
+
+        console.log('Email verified successfully:', result)
+        resolve(true)
+      })
+    })
+  }
+
+  // Resend verification code
+  const resendVerificationCode = (username: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const cognitoUser = new CognitoUser({
+        Username: username,
+        Pool: userPool,
+      })
+
+      cognitoUser.resendConfirmationCode((err, result) => {
+        if (err) {
+          console.error('Resend code failed:', err)
+          resolve(false)
+          return
+        }
+
+        console.log('Verification code resent:', result)
+        resolve(true)
+      })
+    })
+  }
+
   return {
     user,
     isAuthenticated: !!user,
     isLoading,
     idToken,
+    requiresPasswordChange,
     login,
     logout,
+    register,
+    verifyEmail,
+    resendVerificationCode,
     loginWithHostedUI,
     handleOAuthCallback,
     refreshUser,
+    completeNewPasswordChallenge,
   }
 }

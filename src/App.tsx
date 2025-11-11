@@ -1,8 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/use-auth'
 import { useItems } from './hooks/use-items'
 import { LoginForm } from './components/LoginForm'
+import { RegisterForm } from './components/RegisterForm'
+import { VerifyEmailDialog } from './components/VerifyEmailDialog'
+import { ChangePasswordDialog } from './components/ChangePasswordDialog'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { ItemList } from './components/ItemList'
@@ -15,8 +18,43 @@ import { Toaster } from './components/ui/sonner'
 import { toast } from 'sonner'
 
 function App() {
-  const { user, isAuthenticated, isLoading, login, logout, loginWithHostedUI, handleOAuthCallback } = useAuth()
+  const { 
+    user, 
+    isAuthenticated, 
+    isLoading, 
+    requiresPasswordChange,
+    login, 
+    logout,
+    register,
+    verifyEmail,
+    resendVerificationCode,
+    loginWithHostedUI, 
+    handleOAuthCallback,
+    completeNewPasswordChallenge,
+  } = useAuth()
   const { items, createItem, deleteItem, updateItem } = useItems(user)
+  const [showRegister, setShowRegister] = useState(false)
+  const [showVerify, setShowVerify] = useState(false)
+  const [pendingUsername, setPendingUsername] = useState('')
+
+  const handleRegister = async (username: string, email: string, password: string) => {
+    const success = await register(username, email, password)
+    if (success) {
+      setPendingUsername(username)
+      setShowRegister(false)
+      setShowVerify(true)
+    }
+    return success
+  }
+
+  const handleVerify = async (username: string, code: string) => {
+    const success = await verifyEmail(username, code)
+    if (success) {
+      setShowVerify(false)
+      setPendingUsername('')
+    }
+    return success
+  }
 
   // Handle OAuth callback on mount
   useEffect(() => {
@@ -48,9 +86,46 @@ function App() {
   }
 
   if (!isAuthenticated) {
+    if (requiresPasswordChange && completeNewPasswordChallenge) {
+      return (
+        <>
+          <ChangePasswordDialog onPasswordChange={completeNewPasswordChallenge} />
+          <Toaster />
+        </>
+      )
+    }
+
+    if (showVerify) {
+      return (
+        <>
+          <VerifyEmailDialog
+            username={pendingUsername}
+            onVerify={handleVerify}
+            onResendCode={resendVerificationCode}
+            onCancel={() => {
+              setShowVerify(false)
+              setPendingUsername('')
+            }}
+          />
+          <Toaster />
+        </>
+      )
+    }
+
     return (
       <>
-        <LoginForm onLogin={login} onHostedUILogin={loginWithHostedUI} />
+        {showRegister ? (
+          <RegisterForm 
+            onRegister={handleRegister} 
+            onBackToLogin={() => setShowRegister(false)}
+          />
+        ) : (
+          <LoginForm 
+            onLogin={login} 
+            onHostedUILogin={loginWithHostedUI}
+            onShowRegister={() => setShowRegister(true)}
+          />
+        )}
         <Toaster />
       </>
     )

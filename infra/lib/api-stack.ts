@@ -9,11 +9,11 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as path from 'path';
 
-interface ApiStackProps extends cdk.StackProps {
+export interface ApiStackProps extends cdk.StackProps {
   table: dynamodb.Table;
   bucket: s3.Bucket;
-  userPool: cognito.UserPool;
-  userPoolClient: cognito.UserPoolClient;
+  userPool: cognito.IUserPool;
+  userPoolClient: cognito.IUserPoolClient;
 }
 
 export class ApiStack extends cdk.Stack {

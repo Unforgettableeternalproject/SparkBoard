@@ -66,8 +66,8 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
     ? (isAdmin || isModerator)
     : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
   
-  // Can archive if task has been in progress (owner/moderator/admin)
-  const canArchive = item.type === 'task' && onUpdate && (isOwner || isAdmin || isModerator) && item.hasBeenInProgress
+  // Can archive if task is completed (owner/moderator/admin)
+  const canArchive = item.type === 'task' && onUpdate && (isOwner || isAdmin || isModerator) && item.status === 'completed'
   
   // Admin can force archive any task
   const canForceArchive = item.type === 'task' && onUpdate && isAdmin

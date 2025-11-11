@@ -53,6 +53,7 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
     .slice(0, 2)
 
   const isAdmin = user['cognito:groups']?.includes('Admin') || false
+  const isModerator = user['cognito:groups']?.includes('Moderators') || false
 
   return (
     <header className="border-b border-border bg-card sticky top-0 z-10">
@@ -73,6 +74,11 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
             {isAdmin && (
               <Badge variant="default" className="text-xs">
                 Admin
+              </Badge>
+            )}
+            {!isAdmin && isModerator && (
+              <Badge variant="secondary" className="text-xs">
+                Moderator
               </Badge>
             )}
           </div>

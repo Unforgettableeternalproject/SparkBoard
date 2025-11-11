@@ -367,11 +367,15 @@ export function ProfilePage() {
 
   const userRole = user['cognito:groups']?.[0] || 'Users'
   const canCreateAnnouncement = user['cognito:groups']?.includes('Admin') || user['cognito:groups']?.includes('Moderators')
-  const joinedDate = new Date(user.id).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  })
+  
+  // Try to get join date from profile createdAt, fallback to current date if not available
+  const joinedDate = (user as any).createdAt 
+    ? new Date((user as any).createdAt).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+    : 'Recently joined'
 
   return (
     <div className="space-y-6">
