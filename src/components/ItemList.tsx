@@ -12,7 +12,16 @@ interface ItemListProps {
 }
 
 export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpdateItem }: ItemListProps) {
-  if (items.length === 0) {
+  // Filter out archived tasks
+  const activeItems = items.filter(item => {
+    // Keep all announcements
+    if (item.type === 'announcement') return true
+    // Filter out archived tasks
+    if (item.type === 'task' && item.archivedAt) return false
+    return true
+  })
+
+  if (activeItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4">
         <div className="text-center space-y-4 max-w-md">
@@ -37,14 +46,14 @@ export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpd
         <div>
           <h2 className="text-xl font-semibold">Items</h2>
           <p className="text-sm text-muted-foreground">
-            {items.length} {items.length === 1 ? 'item' : 'items'} in your organization
+            {activeItems.length} {activeItems.length === 1 ? 'item' : 'items'} in your organization
           </p>
         </div>
         <CreateItemDialog onCreateItem={onCreateItem} userGroups={currentUser?.['cognito:groups'] || []} />
       </div>
 
       <div className="grid gap-4">
-        {items.map((item) => (
+        {activeItems.map((item) => (
           <ItemCard 
             key={item.id} 
             item={item} 

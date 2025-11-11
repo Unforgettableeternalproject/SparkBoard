@@ -45,22 +45,29 @@ const columns: KanbanColumn[] = [
 ]
 
 export function KanbanView({ items, currentUser, onDelete, onUpdate }: KanbanViewProps) {
+  // Determine task status based on subtasks and completion
+  const getTaskKanbanStatus = (item: SparkItem): TaskStatus => {
+    if (item.type !== 'task') return 'pending'
+    
+    // If task is completed, it goes to Completed column
+    if (item.status === 'completed') {
+      return 'completed'
+    }
+    
+    // If task has subtasks, it goes to In Progress
+    if (item.subtasks && item.subtasks.length > 0) {
+      return 'in-progress'
+    }
+    
+    // Otherwise, it stays in To Do
+    return 'pending'
+  }
+
   // Group tasks by status
   const getTasksByStatus = (status: TaskStatus) => {
     return items.filter(item => {
       if (item.type !== 'task') return false
-      
-      // Map task status to kanban columns
-      if (status === 'completed') {
-        return item.status === 'completed'
-      } else if (status === 'in-progress') {
-        // For now, treat all active tasks as in-progress
-        // Later we can add a separate in-progress status to the backend
-        return false // Placeholder for future enhancement
-      } else {
-        // 'pending' includes all active (non-completed) tasks
-        return item.status === 'active'
-      }
+      return getTaskKanbanStatus(item) === status
     })
   }
 

@@ -21,8 +21,8 @@ export function TasksPage() {
 
   const activeFilter = searchParams.get('filter')
 
-  // Filter only tasks
-  const tasks = items.filter((item) => item.type === 'task')
+  // Filter only tasks (exclude archived by default)
+  const tasks = items.filter((item) => item.type === 'task' && !item.archivedAt)
 
   // Apply quick filters
   const filteredTasks = useMemo(() => {

@@ -4,9 +4,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { EditItemDialog } from '@/components/EditItemDialog'
-import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note } from '@phosphor-icons/react'
+import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note, Archive } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -49,13 +49,28 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
+  const [archivePreview, setArchivePreview] = useState<'aborted' | 'partial' | 'completed' | 'forced'>('completed')
   
-  // Check if current user can delete this item
-  // Tasks: owner, moderators, or admin can delete
-  // Announcements: moderators or admin can delete
-  const canDelete = item.userId === currentUser.sub || 
-                    currentUser['cognito:groups']?.includes('Admin') ||
-                    currentUser['cognito:groups']?.includes('Moderators')
+  // Check permissions
+  const isAdmin = currentUser['cognito:groups']?.includes('Admin')
+  const isModerator = currentUser['cognito:groups']?.includes('Moderators')
+  const isOwner = item.userId === currentUser.sub
+  
+  // For tasks:
+  // - If never been in progress: show delete button (owner/mod/admin)
+  // - If has been in progress: show archive button (owner/mod/admin)
+  // - Admin always sees delete button
+  // For announcements: moderators or admin can delete
+  const canDelete = item.type === 'announcement' 
+    ? (isAdmin || isModerator)
+    : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
+  
+  // Can archive if task has been in progress (owner/moderator/admin)
+  const canArchive = item.type === 'task' && onUpdate && (isOwner || isAdmin || isModerator) && item.hasBeenInProgress
+  
+  // Admin can force archive any task
+  const canForceArchive = item.type === 'task' && onUpdate && isAdmin
   
   // Check if current user can edit this item
   // Tasks: owner, moderators, or admin can edit
@@ -72,6 +87,46 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
       currentUser['cognito:groups']?.includes('Moderators')
     ))
   )
+  
+  // Calculate archive status preview
+  const calculateArchiveStatus = (forced: boolean = false): 'aborted' | 'partial' | 'completed' | 'forced' => {
+    if (forced) return 'forced'
+    
+    const subtasks = item.type === 'task' ? item.subtasks : []
+    if (!subtasks || subtasks.length === 0) {
+      return item.status === 'completed' ? 'completed' : 'aborted'
+    }
+    
+    const completedCount = subtasks.filter(st => st.completed).length
+    if (completedCount === 0) return 'aborted'
+    if (completedCount === subtasks.length) return 'completed'
+    return 'partial'
+  }
+  
+  const handleArchiveClick = (forced: boolean = false) => {
+    const status = calculateArchiveStatus(forced)
+    setArchivePreview(status)
+    setArchiveDialogOpen(true)
+  }
+  
+  const handleArchive = async (forced: boolean = false) => {
+    if (!onUpdate || item.type !== 'task') return
+    
+    setIsUpdating(true)
+    try {
+      await onUpdate(item.sk, {
+        archivedAt: new Date().toISOString(),
+        forcedArchive: forced
+      })
+      toast.success('Task archived successfully')
+      setArchiveDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to archive task:', error)
+      toast.error('Failed to archive task')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
   
   // ✨ Enhanced subtask toggle with loading state and visual feedback
   const handleSubtaskToggle = async (subtaskId: string) => {
@@ -180,6 +235,21 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                   <PencilSimple size={14} weight="duotone" />
                 </Button>
               )}
+              {canArchive && !item.archivedAt && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleArchiveClick(false)
+                  }}
+                  disabled={isUpdating}
+                  className="h-7 w-7 text-muted-foreground hover:text-warning smooth-transition hover:scale-110"
+                  title="Archive task"
+                >
+                  <Archive size={14} weight="duotone" />
+                </Button>
+              )}
               {canDelete && onDelete && (
                 <Button
                   variant="ghost"
@@ -192,7 +262,7 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                   }}
                   disabled={isUpdating}
                   className="h-7 w-7 text-muted-foreground hover:text-destructive smooth-transition hover:scale-110"
-                  title="Delete item"
+                  title={item.type === 'task' && item.hasBeenInProgress ? 'Cannot delete task that has been in progress' : 'Delete item'}
                 >
                   <Trash size={14} weight="duotone" />
                 </Button>
@@ -204,6 +274,25 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
             {item.type === 'task' && item.status && (
               <Badge variant={item.status === 'completed' ? 'outline' : 'secondary'} className="text-xs">
                 {item.status}
+              </Badge>
+            )}
+            {item.type === 'task' && item.archivedAt && (
+              <Badge variant="outline" className="text-xs border-warning text-warning">
+                <Archive size={10} className="mr-1" weight="fill" />
+                Archived
+              </Badge>
+            )}
+            {item.type === 'task' && item.archiveStatus && (
+              <Badge 
+                variant={
+                  item.archiveStatus === 'completed' ? 'default' : 
+                  item.archiveStatus === 'partial' ? 'secondary' : 
+                  item.archiveStatus === 'forced' ? 'outline' : 
+                  'destructive'
+                }
+                className="text-xs"
+              >
+                {item.archiveStatus}
               </Badge>
             )}
             {item.type === 'announcement' && item.priority && item.priority !== 'normal' && (
@@ -525,6 +614,81 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Archive Confirmation Dialog */}
+      {canArchive && (
+        <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <Archive size={24} weight="duotone" className="text-warning" />
+                <DialogTitle>Archive Task</DialogTitle>
+              </div>
+              <DialogDescription>
+                Are you sure you want to archive "{item.title}"?
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg border bg-muted/50">
+                <p className="text-sm font-medium mb-2">Archive Status Preview:</p>
+                <Badge 
+                  variant={
+                    archivePreview === 'completed' ? 'default' : 
+                    archivePreview === 'partial' ? 'secondary' : 
+                    archivePreview === 'forced' ? 'outline' : 
+                    'destructive'
+                  }
+                  className="text-sm"
+                >
+                  {archivePreview.toUpperCase()}
+                </Badge>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {archivePreview === 'completed' && 'All subtasks completed'}
+                  {archivePreview === 'partial' && 'Some subtasks completed'}
+                  {archivePreview === 'aborted' && 'No subtasks completed'}
+                  {archivePreview === 'forced' && 'Forced archive by admin'}
+                </p>
+              </div>
+              
+              {item.type === 'task' && item.subtasks && item.subtasks.length > 0 && (
+                <div className="text-xs space-y-1">
+                  <p className="font-medium">Completion Summary:</p>
+                  <p className="text-muted-foreground">
+                    {item.subtasks.filter(st => st.completed).length} of {item.subtasks.length} subtasks completed
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setArchiveDialogOpen(false)}
+                disabled={isUpdating}
+              >
+                Cancel
+              </Button>
+              {canForceArchive && (
+                <Button
+                  variant="secondary"
+                  onClick={() => handleArchive(true)}
+                  disabled={isUpdating}
+                >
+                  Force Archive
+                </Button>
+              )}
+              <Button
+                variant="default"
+                onClick={() => handleArchive(false)}
+                disabled={isUpdating}
+              >
+                {isUpdating ? 'Archiving...' : 'Archive'}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

@@ -20,7 +20,8 @@ import {
   MegaphoneSimple,
   PencilSimple,
   FloppyDisk,
-  X
+  X,
+  Archive
 } from '@phosphor-icons/react'
 import { formatDate } from '@/lib/helpers'
 import { toast } from 'sonner'
@@ -62,6 +63,7 @@ export function ProfilePage() {
         tasksCreated: 0,
         tasksCompleted: 0,
         tasksActive: 0,
+        tasksArchived: 0,
         announcementsCreated: 0,
         totalItems: 0
       }
@@ -69,8 +71,9 @@ export function ProfilePage() {
 
     const userItems = items.filter(item => item.userId === user.id)
     const tasks = userItems.filter(item => item.type === 'task')
-    const completedTasks = tasks.filter(task => task.status === 'completed')
-    const activeTasks = tasks.filter(task => task.status === 'active')
+    const completedTasks = tasks.filter(task => task.status === 'completed' && !task.archivedAt)
+    const activeTasks = tasks.filter(task => task.status === 'active' && !task.archivedAt)
+    const archivedTasks = tasks.filter(task => task.archivedAt)
     const announcements = userItems.filter(item => item.type === 'announcement')
 
     // Debug: Log statistics calculation
@@ -88,6 +91,7 @@ export function ProfilePage() {
       tasksCreated: tasks.length,
       tasksCompleted: completedTasks.length,
       tasksActive: activeTasks.length,
+      tasksArchived: archivedTasks.length,
       announcementsCreated: announcements.length,
       totalItems: userItems.length
     }
@@ -546,7 +550,7 @@ export function ProfilePage() {
         {/* Statistics and Activity */}
         <div className="md:col-span-2 space-y-6">
           {/* Statistics Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Total Items</CardDescription>
@@ -584,6 +588,20 @@ export function ProfilePage() {
               </CardContent>
             </Card>
 
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>
+                  <div className="flex items-center gap-1">
+                    <Archive size={14} />
+                    <span>Archived</span>
+                  </div>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-warning">{stats.tasksArchived}</div>
+              </CardContent>
+            </Card>
+
             {canCreateAnnouncement && (
               <Card>
                 <CardHeader className="pb-2">
@@ -609,15 +627,21 @@ export function ProfilePage() {
             </CardHeader>
             <CardContent>
               <Tabs defaultValue="all" className="w-full">
-                <TabsList className={`grid w-full ${canCreateAnnouncement ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                <TabsList className={`grid w-full ${canCreateAnnouncement ? 'grid-cols-4' : 'grid-cols-3'}`}>
                   <TabsTrigger value="all">All</TabsTrigger>
                   <TabsTrigger value="tasks">Tasks</TabsTrigger>
+                  <TabsTrigger value="archived">Archived</TabsTrigger>
                   {canCreateAnnouncement && <TabsTrigger value="announcements">Announcements</TabsTrigger>}
                 </TabsList>
 
                 <TabsContent value="all" className="space-y-4 mt-4">
                   {items
-                    .filter(item => item.userId === user.id)
+                    .filter(item => {
+                      // Filter by user and exclude archived tasks
+                      if (item.userId !== user.id) return false
+                      if (item.type === 'task' && item.archivedAt) return false
+                      return true
+                    })
                     .slice(0, 5)
                     .map(item => {
                       const Icon = item.type === 'task' ? ListChecks : MegaphoneSimple
@@ -638,14 +662,18 @@ export function ProfilePage() {
                         </div>
                       )
                     })}
-                  {items.filter(item => item.userId === user.id).length === 0 && (
+                  {items.filter(item => {
+                    if (item.userId !== user.id) return false
+                    if (item.type === 'task' && item.archivedAt) return false
+                    return true
+                  }).length === 0 && (
                     <p className="text-center text-muted-foreground py-8">No items yet</p>
                   )}
                 </TabsContent>
 
                 <TabsContent value="tasks" className="space-y-4 mt-4">
                   {items
-                    .filter(item => item.userId === user.id && item.type === 'task')
+                    .filter(item => item.userId === user.id && item.type === 'task' && !item.archivedAt)
                     .slice(0, 5)
                     .map(item => {
                       if (item.type !== 'task') return null
@@ -666,8 +694,46 @@ export function ProfilePage() {
                       </div>
                       )
                     })}
-                  {items.filter(item => item.userId === user.id && item.type === 'task').length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">No tasks yet</p>
+                  {items.filter(item => item.userId === user.id && item.type === 'task' && !item.archivedAt).length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">No active tasks</p>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="archived" className="space-y-4 mt-4">
+                  {items
+                    .filter(item => item.userId === user.id && item.type === 'task' && item.archivedAt)
+                    .slice(0, 10)
+                    .map(item => {
+                      if (item.type !== 'task') return null
+                      return (
+                        <div key={item.sk} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
+                          <Archive size={20} className="mt-0.5 text-warning" weight="duotone" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{item.title}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {item.archiveStatus && (
+                                <Badge 
+                                  variant={
+                                    item.archiveStatus === 'completed' ? 'default' : 
+                                    item.archiveStatus === 'partial' ? 'secondary' : 
+                                    item.archiveStatus === 'forced' ? 'outline' : 
+                                    'destructive'
+                                  }
+                                  className="text-xs"
+                                >
+                                  {item.archiveStatus}
+                                </Badge>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                Archived: {item.archivedAt ? formatDate(item.archivedAt) : 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  {items.filter(item => item.userId === user.id && item.type === 'task' && item.archivedAt).length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">No archived tasks</p>
                   )}
                 </TabsContent>
 

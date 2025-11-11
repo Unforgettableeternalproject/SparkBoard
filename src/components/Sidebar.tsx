@@ -25,12 +25,12 @@ interface SidebarProps {
 export function Sidebar({ items = [], isAdmin = false, className }: SidebarProps) {
   const location = useLocation()
   
-  // Calculate statistics
-  const tasks = items.filter(item => item.type === 'task')
-  const activeTasks = tasks.filter(task => task.status !== 'completed')
-  const completedTasks = tasks.filter(task => task.status === 'completed')
+  // Calculate statistics (exclude archived tasks)
+  const tasks = items.filter(item => item.type === 'task' && !item.archivedAt)
+  const activeTasks = tasks.filter(task => task.type === 'task' && task.status !== 'completed')
+  const completedTasks = tasks.filter(task => task.type === 'task' && task.status === 'completed')
   const overdueTasks = tasks.filter(task => {
-    if (!task.deadline || task.status === 'completed') return false
+    if (task.type !== 'task' || !task.deadline || task.status === 'completed') return false
     return new Date(task.deadline) < new Date()
   })
   // Only count non-expired announcements
@@ -39,6 +39,8 @@ export function Sidebar({ items = [], isAdmin = false, className }: SidebarProps
     if (!item.expiresAt) return true
     return new Date(item.expiresAt) > new Date()
   })
+  // Count active items (non-archived tasks + announcements)
+  const activeItemsCount = tasks.length + announcements.length
   
   const navigation: Array<{
     name: string
@@ -51,7 +53,7 @@ export function Sidebar({ items = [], isAdmin = false, className }: SidebarProps
       name: 'All Items',
       href: '/',
       icon: Table,
-      count: items.length,
+      count: activeItemsCount,
       current: location.pathname === '/'
     },
     {

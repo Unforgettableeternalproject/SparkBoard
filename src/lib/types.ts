@@ -52,10 +52,13 @@ export interface Task {
   updatedAt?: string
   userId: string
   userName: string
-  status: 'active' | 'completed'
+  status: 'active' | 'completed' | 'in-progress'
   deadline?: string // ISO date string
   subtasks: SubTask[]
   completedAt?: string
+  archivedAt?: string // ISO date string - task archived date
+  archiveStatus?: 'aborted' | 'partial' | 'completed' | 'forced' // completion state when archived
+  hasBeenInProgress?: boolean // tracks if task ever had subtasks (prevents deletion)
   attachments?: FileAttachment[]
   annotations?: Annotation[]
 }

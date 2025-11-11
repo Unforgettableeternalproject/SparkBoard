@@ -237,6 +237,9 @@ async function getItems(event) {
       subtasks: item.subtasks,
       deadline: item.deadline,
       completedAt: item.completedAt,
+      archivedAt: item.archivedAt,
+      archiveStatus: item.archiveStatus,
+      hasBeenInProgress: item.hasBeenInProgress,
       // Announcement-specific fields
       priority: item.priority,
       expiresAt: item.expiresAt,
@@ -321,6 +324,11 @@ async function deleteItem(event) {
       return createErrorResponse(403, 'Forbidden', 'You do not have permission to delete this item');
     }
 
+    // For tasks: only allow deletion if task has never been in progress (no subtasks history)
+    if (item.type === 'task' && item.hasBeenInProgress) {
+      return createErrorResponse(400, 'BadRequest', 'Cannot delete task that has been in progress. Please archive it instead.');
+    }
+
     // Delete the item
     const deleteCommand = new DeleteCommand({
       TableName: TABLE_NAME,
@@ -400,54 +408,136 @@ async function updateItem(event) {
     }
 
     // Prepare update expression
-    const updateExpressions = [];
+    const setExpressions = [];
+    const removeExpressions = [];
     const expressionAttributeNames = {};
     const expressionAttributeValues = {};
     let counter = 0;
 
     // Update task-specific fields
+    let statusUpdated = false;
+    let completedAtSet = false;
+    let newStatus = item.status;
+
     if (item.type === 'task') {
-      if (body.status !== undefined) {
-        counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
-        expressionAttributeNames[`#attr${counter}`] = 'status';
-        expressionAttributeValues[`:val${counter}`] = body.status;
-
-        // If completing task, add completedAt
-        if (body.status === 'completed') {
-          counter++;
-          updateExpressions.push(`#attr${counter} = :val${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
-          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
-        }
-      }
-
+      // Track if task has ever been in progress (has/had subtasks)
+      let shouldMarkInProgress = false;
+      
+      // Check subtasks first to determine auto-completion
+      let shouldAutoComplete = false;
       if (body.subtasks !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'subtasks';
         expressionAttributeValues[`:val${counter}`] = body.subtasks;
 
+        // Mark as having been in progress if subtasks are added
+        if (body.subtasks.length > 0 && !item.hasBeenInProgress) {
+          shouldMarkInProgress = true;
+        }
+
         // Auto-complete task if all subtasks are completed
         const allCompleted = body.subtasks.every(st => st.completed);
-        if (allCompleted && body.subtasks.length > 0 && item.status !== 'completed') {
-          counter++;
-          updateExpressions.push(`#attr${counter} = :val${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'status';
-          expressionAttributeValues[`:val${counter}`] = 'completed';
+        const anyIncomplete = body.subtasks.some(st => !st.completed);
+        
+        if (allCompleted && body.subtasks.length > 0) {
+          shouldAutoComplete = true;
+          newStatus = 'completed';
+        } else if (anyIncomplete && item.status === 'completed') {
+          // If task was completed but now has incomplete subtasks, revert to in-progress
+          newStatus = 'in-progress';
+        }
+      }
 
+      // Set hasBeenInProgress flag
+      if (shouldMarkInProgress) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'hasBeenInProgress';
+        expressionAttributeValues[`:val${counter}`] = true;
+      }
+
+      // Handle explicit status update (overrides auto-completion)
+      if (body.status !== undefined) {
+        newStatus = body.status;
+      }
+
+      // Apply status update if changed
+      if (newStatus !== item.status) {
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'status';
+        expressionAttributeValues[`:val${counter}`] = newStatus;
+        statusUpdated = true;
+
+        // Set completedAt when transitioning to completed
+        if (newStatus === 'completed' && !item.completedAt) {
           counter++;
-          updateExpressions.push(`#attr${counter} = :val${counter}`);
+          setExpressions.push(`#attr${counter} = :val${counter}`);
           expressionAttributeNames[`#attr${counter}`] = 'completedAt';
           expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+          completedAtSet = true;
+        } else if (newStatus !== 'completed' && item.completedAt) {
+          // Remove completedAt if moving away from completed status
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
         }
       }
 
       if (body.deadline !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'deadline';
         expressionAttributeValues[`:val${counter}`] = body.deadline;
+      }
+
+      // Handle archiving with status calculation
+      if (body.archivedAt !== undefined) {
+        if (body.archivedAt) {
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archivedAt';
+          expressionAttributeValues[`:val${counter}`] = body.archivedAt;
+
+          // Calculate archive status
+          let archiveStatus;
+          const forcedByAdmin = body.forcedArchive === true;
+          
+          if (forcedByAdmin) {
+            archiveStatus = 'forced';
+          } else {
+            const currentSubtasks = body.subtasks !== undefined ? body.subtasks : item.subtasks || [];
+            
+            if (!currentSubtasks || currentSubtasks.length === 0) {
+              // No subtasks: completed if status is completed, otherwise aborted
+              archiveStatus = (body.status || item.status) === 'completed' ? 'completed' : 'aborted';
+            } else {
+              const completedCount = currentSubtasks.filter(st => st.completed).length;
+              if (completedCount === 0) {
+                archiveStatus = 'aborted';
+              } else if (completedCount === currentSubtasks.length) {
+                archiveStatus = 'completed';
+              } else {
+                archiveStatus = 'partial';
+              }
+            }
+          }
+
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archiveStatus';
+          expressionAttributeValues[`:val${counter}`] = archiveStatus;
+        } else {
+          // Unarchive - remove both archivedAt and archiveStatus
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archivedAt';
+          
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'archiveStatus';
+        }
       }
     }
 
@@ -455,28 +545,28 @@ async function updateItem(event) {
     if (item.type === 'announcement') {
       if (body.priority !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'priority';
         expressionAttributeValues[`:val${counter}`] = body.priority;
       }
 
       if (body.expiresAt !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'expiresAt';
         expressionAttributeValues[`:val${counter}`] = body.expiresAt;
       }
 
       if (body.isPinned !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'isPinned';
         expressionAttributeValues[`:val${counter}`] = body.isPinned;
       }
 
       if (body.pinnedUntil !== undefined) {
         counter++;
-        updateExpressions.push(`#attr${counter} = :val${counter}`);
+        setExpressions.push(`#attr${counter} = :val${counter}`);
         expressionAttributeNames[`#attr${counter}`] = 'pinnedUntil';
         expressionAttributeValues[`:val${counter}`] = body.pinnedUntil;
       }
@@ -485,14 +575,14 @@ async function updateItem(event) {
     // Update common fields
     if (body.title !== undefined) {
       counter++;
-      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      setExpressions.push(`#attr${counter} = :val${counter}`);
       expressionAttributeNames[`#attr${counter}`] = 'title';
       expressionAttributeValues[`:val${counter}`] = body.title;
     }
 
     if (body.content !== undefined) {
       counter++;
-      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      setExpressions.push(`#attr${counter} = :val${counter}`);
       expressionAttributeNames[`#attr${counter}`] = 'content';
       expressionAttributeValues[`:val${counter}`] = body.content;
     }
@@ -500,19 +590,29 @@ async function updateItem(event) {
     // Update annotations (for admin notes)
     if (body.annotations !== undefined) {
       counter++;
-      updateExpressions.push(`#attr${counter} = :val${counter}`);
+      setExpressions.push(`#attr${counter} = :val${counter}`);
       expressionAttributeNames[`#attr${counter}`] = 'annotations';
       expressionAttributeValues[`:val${counter}`] = body.annotations;
     }
 
     // Always update updatedAt
     counter++;
-    updateExpressions.push(`#attr${counter} = :val${counter}`);
+    setExpressions.push(`#attr${counter} = :val${counter}`);
     expressionAttributeNames[`#attr${counter}`] = 'updatedAt';
     expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
 
-    if (updateExpressions.length === 0) {
+    if (setExpressions.length === 0 && removeExpressions.length === 0) {
       return createErrorResponse(400, 'BadRequest', 'No valid fields to update');
+    }
+
+    // Build UpdateExpression with both SET and REMOVE operations
+    let updateExpression = '';
+    if (setExpressions.length > 0) {
+      updateExpression += `SET ${setExpressions.join(', ')}`;
+    }
+    if (removeExpressions.length > 0) {
+      if (updateExpression) updateExpression += ' ';
+      updateExpression += `REMOVE ${removeExpressions.join(', ')}`;
     }
 
     // Update the item in DynamoDB
@@ -522,7 +622,7 @@ async function updateItem(event) {
         PK: `ORG#${user.orgId}`,
         SK: sk,
       },
-      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      UpdateExpression: updateExpression,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: expressionAttributeValues,
       ReturnValues: 'ALL_NEW',

@@ -4,7 +4,7 @@ import { User } from '@/lib/types'
 import { toast } from 'sonner'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-const POLLING_INTERVAL = 30000 // 30 seconds
+const POLLING_INTERVAL = 120000 // 2 minutes (120 seconds)
 
 export function useItems(user: User | null) {
   const [items, setItems] = useState<SparkItem[]>([])
