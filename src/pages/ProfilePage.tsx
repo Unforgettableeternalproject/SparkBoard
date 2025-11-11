@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ChangePasswordForm } from '@/components/ChangePasswordForm'
 import { getAvatarColor } from '@/lib/avatar-utils'
 import {
   User as UserIcon,
@@ -22,7 +23,8 @@ import {
   PencilSimple,
   FloppyDisk,
   X,
-  Archive
+  Archive,
+  Lock
 } from '@phosphor-icons/react'
 import { formatDate } from '@/lib/helpers'
 import { toast } from 'sonner'
@@ -31,6 +33,7 @@ export function ProfilePage() {
   const { user, idToken, refreshUser } = useAuth()
   const { items } = useItems(user)
   const [isEditing, setIsEditing] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [bio, setBio] = useState('')
@@ -302,6 +305,10 @@ export function ProfilePage() {
     }
   }
 
+  const handleChangePassword = () => {
+    setShowChangePassword(true)
+  }
+
   const handleSave = async () => {
     try {
       // Validate name and email
@@ -563,23 +570,44 @@ export function ProfilePage() {
               )}
             </div>
 
-            {isEditing && (
+            {isEditing ? (
               <>
                 <Separator />
-                <div className="flex gap-2">
-                  <Button onClick={handleSave} className="flex-1">
-                    <FloppyDisk size={18} className="mr-2" weight="duotone" />
-                    Save
-                  </Button>
-                  <Button onClick={handleCancel} variant="outline" className="flex-1">
-                    <X size={18} className="mr-2" />
-                    Cancel
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Button onClick={handleSave} className="flex-1">
+                      <FloppyDisk size={18} className="mr-2" weight="duotone" />
+                      Save
+                    </Button>
+                    <Button onClick={handleCancel} variant="outline" className="flex-1">
+                      <X size={18} className="mr-2" />
+                      Cancel
+                    </Button>
+                  </div>
+                  <Button onClick={handleChangePassword} variant="secondary" className="w-full">
+                    <Lock size={18} className="mr-2" weight="duotone" />
+                    Change Password
                   </Button>
                 </div>
+              </>
+            ) : (
+              <>
+                <Separator />
+                <Button onClick={handleChangePassword} variant="outline" className="w-full">
+                  <Lock size={18} className="mr-2" weight="duotone" />
+                  Change Password
+                </Button>
               </>
             )}
           </CardContent>
         </Card>
+        
+        {/* Change Password Dialog */}
+        <ChangePasswordForm 
+          open={showChangePassword} 
+          onOpenChange={setShowChangePassword}
+          username={user?.email || ''}
+        />
 
         {/* Statistics and Activity */}
         <div className="md:col-span-2 space-y-6">

@@ -37,3 +37,10 @@ pids
 scripts/*
 
 *.zip
+
+tests/
+
+*.tests.js
+
+**/coverage/*
+services/**/index.test.js

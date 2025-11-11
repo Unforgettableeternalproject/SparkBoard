@@ -307,7 +307,9 @@ export function UserManagement() {
                   const email = user.Attributes.find((attr) => attr.Name === 'email')?.Value || ''
                   const name = user.Attributes.find((attr) => attr.Name === 'name')?.Value || user.Username
                   const userGroups = user.Groups || []
-                  const primaryGroup = userGroups[0] || 'Users'
+                  // Determine highest priority role
+                  const primaryGroup = userGroups.includes('Admin') ? 'Admin' : 
+                                      userGroups.includes('Moderators') ? 'Moderators' : 'Users'
 
                   return (
                     <TableRow key={user.Username}>
@@ -322,19 +324,9 @@ export function UserManagement() {
                       </TableCell>
                       <TableCell>{email}</TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {userGroups.length > 0 ? (
-                            userGroups.map((group) => (
-                              <Badge key={group} variant={getRoleColor(group)} className="text-xs">
-                                {group}
-                              </Badge>
-                            ))
-                          ) : (
-                            <Badge variant="outline" className="text-xs">
-                              None
-                            </Badge>
-                          )}
-                        </div>
+                        <Badge variant={getRoleColor(primaryGroup)} className="text-xs">
+                          {primaryGroup}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant={user.Enabled ? 'default' : 'destructive'} className="text-xs">
@@ -343,62 +335,50 @@ export function UserManagement() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex gap-1 justify-end flex-wrap">
-                          {/* Add to Group */}
+                          {/* Set Role */}
                           <Select
-                            value=""
-                            onValueChange={(groupName) => {
-                              if (groupName) {
-                                addToGroupMutation.mutate({ username: user.Username, groupName })
+                            value={primaryGroup}
+                            onValueChange={(newRole) => {
+                              if (newRole && newRole !== primaryGroup) {
+                                // Remove from current groups first if needed
+                                const removePromises = userGroups.map(group => 
+                                  removeFromGroupMutation.mutateAsync({ username: user.Username, groupName: group })
+                                )
+                                
+                                Promise.all(removePromises).then(() => {
+                                  // Add to new role if not Users
+                                  if (newRole !== 'Users') {
+                                    addToGroupMutation.mutate({ username: user.Username, groupName: newRole })
+                                  }
+                                })
                               }
                             }}
                             disabled={addToGroupMutation.isPending || removeFromGroupMutation.isPending}
                           >
-                            <SelectTrigger className="w-[100px] h-8 text-xs">
-                              <SelectValue placeholder="Add to..." />
+                            <SelectTrigger className="w-[130px] h-8 text-xs">
+                              <SelectValue placeholder="Set role..." />
                             </SelectTrigger>
                             <SelectContent>
-                              {!userGroups.includes('Admin') && (
-                                <SelectItem value="Admin">
-                                  <div className="flex items-center gap-2">
-                                    <ShieldCheck size={12} />
-                                    Admin
-                                  </div>
-                                </SelectItem>
-                              )}
-                              {!userGroups.includes('Moderators') && (
-                                <SelectItem value="Moderators">
-                                  <div className="flex items-center gap-2">
-                                    <ShieldCheck size={12} />
-                                    Moderators
-                                  </div>
-                                </SelectItem>
-                              )}
+                              <SelectItem value="Admin">
+                                <div className="flex items-center gap-2">
+                                  <ShieldCheck size={12} />
+                                  Admin
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="Moderators">
+                                <div className="flex items-center gap-2">
+                                  <ShieldCheck size={12} />
+                                  Moderator
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="Users">
+                                <div className="flex items-center gap-2">
+                                  <UserCircle size={12} />
+                                  User
+                                </div>
+                              </SelectItem>
                             </SelectContent>
                           </Select>
-                          
-                          {/* Remove from Group */}
-                          {userGroups.length > 0 && (
-                            <Select
-                              value=""
-                              onValueChange={(groupName) => {
-                                if (groupName) {
-                                  removeFromGroupMutation.mutate({ username: user.Username, groupName })
-                                }
-                              }}
-                              disabled={addToGroupMutation.isPending || removeFromGroupMutation.isPending}
-                            >
-                              <SelectTrigger className="w-[120px] h-8 text-xs">
-                                <SelectValue placeholder="Remove..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {userGroups.map((group) => (
-                                  <SelectItem key={group} value={group}>
-                                    Remove {group}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
 
                           {/* Enable/Disable User */}
                           <Button

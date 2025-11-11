@@ -1,16 +1,36 @@
 {
-  "name": "sparkboard-monitoring-service",
-  "version": "1.0.0",
-  "description": "SparkBoard Monitoring Lambda - CloudWatch and X-Ray metrics",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"No tests yet\" && exit 0"
-  },
-  "keywords": ["lambda", "cloudwatch", "x-ray", "monitoring"],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@aws-sdk/client-cloudwatch": "^3.700.0",
-    "@aws-sdk/client-xray": "^3.700.0"
-  }
+    "name": "sparkboard-monitoring-service",
+    "version": "1.0.0",
+    "description": "SparkBoard Monitoring Lambda - CloudWatch and X-Ray metrics",
+    "main": "index.js",
+    "scripts": {
+        "test": "jest --coverage"
+    },
+    "keywords": [
+        "lambda",
+        "cloudwatch",
+        "x-ray",
+        "monitoring"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@aws-sdk/client-cloudwatch": "^3.700.0",
+        "@aws-sdk/client-xray": "^3.700.0",
+        "@aws-sdk/client-dynamodb": "^3.478.0",
+        "@aws-sdk/lib-dynamodb": "^3.478.0"
+    },
+    "jest": {
+        "testEnvironment": "node",
+        "testMatch": [
+            "**/*.test.js"
+        ],
+        "coverageDirectory": "coverage",
+        "collectCoverageFrom": [
+            "index.js"
+        ]
+    },
+    "devDependencies": {
+        "jest": "^29.7.0"
+    }
 }

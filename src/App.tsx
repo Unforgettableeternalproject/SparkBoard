@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './hooks/use-auth'
 import { useItems } from './hooks/use-items'
 import { LoginForm } from './components/LoginForm'
@@ -134,35 +134,61 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-background flex flex-col">
-        <Header user={user!} onLogout={logout} items={items || []} avatarVersion={avatarVersion} />
-        <PinnedAnnouncementBanner announcements={items || []} />
-        <div className="flex-1 flex overflow-hidden">
-          {/* Sidebar - Hidden on mobile, visible on desktop */}
-          <div className="hidden lg:block w-64 border-r bg-card/50 overflow-y-auto">
-            <Sidebar 
-              items={items || []} 
-              isAdmin={user?.['cognito:groups']?.includes('Admin')}
-            />
-          </div>
-          
-          {/* Main Content */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="container mx-auto px-4 py-8 animate-fade-in">
-              <Routes>
-                <Route path="/" element={<ItemList items={items || []} currentUser={user!} onCreateItem={createItem} onDeleteItem={deleteItem} onUpdateItem={updateItem} />} />
-                <Route path="/tasks" element={<TasksPage />} />
-                <Route path="/announcements" element={<AnnouncementsPage />} />
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/admin" element={<AdminDashboard />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </main>
-        </div>
-        <Toaster />
-      </div>
+      <AppContent 
+        user={user!} 
+        logout={logout} 
+        items={items || []} 
+        avatarVersion={avatarVersion}
+        createItem={createItem}
+        deleteItem={deleteItem}
+        updateItem={updateItem}
+      />
     </BrowserRouter>
+  )
+}
+
+// Separate component to use navigate hook
+function AppContent({ user, logout, items, avatarVersion, createItem, deleteItem, updateItem }: any) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  
+  const handleLogout = () => {
+    logout()
+    // Navigate to home and force a refresh
+    navigate('/')
+    // Small delay to ensure state is updated
+    setTimeout(() => window.location.reload(), 100)
+  }
+  
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <Header user={user} onLogout={handleLogout} items={items} avatarVersion={avatarVersion} />
+      <PinnedAnnouncementBanner announcements={items} />
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar - Hidden on mobile, visible on desktop */}
+        <div className="hidden lg:block w-64 border-r bg-card/50 overflow-y-auto">
+          <Sidebar 
+            items={items} 
+            isAdmin={user?.['cognito:groups']?.includes('Admin')}
+          />
+        </div>
+        
+        {/* Main Content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="container mx-auto px-4 py-8 animate-fade-in">
+            <Routes>
+              <Route path="/" element={<ItemList items={items} currentUser={user} onCreateItem={createItem} onDeleteItem={deleteItem} onUpdateItem={updateItem} />} />
+              <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/announcements" element={<AnnouncementsPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
+      </div>
+      <Toaster />
+    </div>
   )
 }
 

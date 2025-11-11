@@ -27,6 +27,7 @@ export function LoginForm({ onLogin, onHostedUILogin, onShowRegister }: LoginFor
       
       if (success) {
         toast.success('Successfully logged in')
+        // No need to navigate, App.tsx will handle routing after authentication
       } else {
         toast.error('Invalid username/email or password')
       }

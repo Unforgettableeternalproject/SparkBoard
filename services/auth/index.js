@@ -116,6 +116,9 @@ async function handleGetProfile(event) {
     success: true,
     user: {
       ...user,
+      // Use DynamoDB values if available, otherwise fall back to JWT claims
+      name: profile?.name || user.name,
+      email: profile?.email || user.email,
       bio: profile?.bio,
       avatarUrl: profile?.avatarUrl,
       createdAt: profile?.createdAt,

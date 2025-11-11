@@ -1,8 +1,24 @@
 {
-  "name": "sparkboard-health-handler",
-  "version": "1.0.0",
-  "private": true,
-  "type": "commonjs",
-  "main": "index.js",
-  "dependencies": {}
+    "name": "sparkboard-health-handler",
+    "version": "1.0.0",
+    "private": true,
+    "type": "commonjs",
+    "main": "index.js",
+    "scripts": {
+        "test": "jest --coverage"
+    },
+    "dependencies": {},
+    "jest": {
+        "testEnvironment": "node",
+        "testMatch": [
+            "**/*.test.js"
+        ],
+        "coverageDirectory": "coverage",
+        "collectCoverageFrom": [
+            "index.js"
+        ]
+    },
+    "devDependencies": {
+        "jest": "^29.7.0"
+    }
 }
