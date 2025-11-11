@@ -121,9 +121,11 @@ async function getMetrics(event) {
       'SparkBoard-AuthMe',
       'SparkBoard-Items',
       'SparkBoard-Uploads',
+      'SparkBoard-Users',
+      'SparkBoard-Monitoring',
     ];
 
-    const lambdaMetrics = await Promise.all(
+    const lambdaMetricsArray = await Promise.all(
       lambdaFunctions.map(async (functionName) => {
         const [duration, errors, throttles] = await Promise.all([
           cloudwatch.send(
@@ -163,12 +165,40 @@ async function getMetrics(event) {
 
         return {
           functionName,
-          duration: duration.Datapoints || [],
-          errors: errors.Datapoints || [],
-          throttles: throttles.Datapoints || [],
+          duration: {
+            label: 'Duration (ms)',
+            datapoints: (duration.Datapoints || []).map(dp => ({
+              timestamp: dp.Timestamp.getTime(),
+              value: dp.Average || 0,
+            })),
+          },
+          errors: {
+            label: 'Errors',
+            datapoints: (errors.Datapoints || []).map(dp => ({
+              timestamp: dp.Timestamp.getTime(),
+              value: dp.Sum || 0,
+            })),
+          },
+          throttles: {
+            label: 'Throttles',
+            datapoints: (throttles.Datapoints || []).map(dp => ({
+              timestamp: dp.Timestamp.getTime(),
+              value: dp.Sum || 0,
+            })),
+          },
         };
       })
     );
+
+    // Convert array to object with function names as keys
+    const lambdaMetrics = {};
+    lambdaMetricsArray.forEach(item => {
+      lambdaMetrics[item.functionName] = {
+        duration: item.duration,
+        errors: item.errors,
+        throttles: item.throttles,
+      };
+    });
 
     // DynamoDB metrics
     const dynamoMetrics = await Promise.all([
@@ -200,15 +230,51 @@ async function getMetrics(event) {
       success: true,
       period: `${hours} hours`,
       api: {
-        requests: apiMetrics[0].Datapoints || [],
-        errors4xx: apiMetrics[1].Datapoints || [],
-        errors5xx: apiMetrics[2].Datapoints || [],
-        latency: apiMetrics[3].Datapoints || [],
+        requestCount: {
+          label: 'Request Count',
+          datapoints: (apiMetrics[0].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Sum || 0,
+          })),
+        },
+        errorRate4xx: {
+          label: '4xx Error Rate',
+          datapoints: (apiMetrics[1].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Sum || 0,
+          })),
+        },
+        errorRate5xx: {
+          label: '5xx Error Rate',
+          datapoints: (apiMetrics[2].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Sum || 0,
+          })),
+        },
+        latency: {
+          label: 'Latency (ms)',
+          datapoints: (apiMetrics[3].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Average || 0,
+          })),
+        },
       },
       lambda: lambdaMetrics,
       dynamodb: {
-        readCapacity: dynamoMetrics[0].Datapoints || [],
-        writeCapacity: dynamoMetrics[1].Datapoints || [],
+        readCapacity: {
+          label: 'Read Capacity Units',
+          datapoints: (dynamoMetrics[0].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Sum || 0,
+          })),
+        },
+        writeCapacity: {
+          label: 'Write Capacity Units',
+          datapoints: (dynamoMetrics[1].Datapoints || []).map(dp => ({
+            timestamp: dp.Timestamp.getTime(),
+            value: dp.Sum || 0,
+          })),
+        },
       },
     });
   } catch (error) {
@@ -261,20 +327,20 @@ async function getTraces(event) {
       success: true,
       period: `${minutes} minutes`,
       summaries: traceSummaries.map((summary) => ({
-        id: summary.Id,
-        duration: summary.Duration,
-        responseTime: summary.ResponseTime,
-        hasError: summary.HasError || false,
-        hasFault: summary.HasFault || false,
-        hasThrottle: summary.HasThrottle || false,
-        http: summary.Http,
-        users: summary.Users,
-        serviceIds: summary.ServiceIds,
+        Id: summary.Id,
+        Duration: summary.Duration,
+        ResponseTime: summary.ResponseTime,
+        HasError: summary.HasError || false,
+        HasFault: summary.HasFault || false,
+        HasThrottle: summary.HasThrottle || false,
+        Http: summary.Http,
+        Users: summary.Users,
+        ServiceIds: summary.ServiceIds,
       })),
       traces: traces.map((trace) => ({
-        id: trace.Id,
-        duration: trace.Duration,
-        segments: trace.Segments?.map((seg) => {
+        Id: trace.Id,
+        Duration: trace.Duration,
+        Segments: trace.Segments?.map((seg) => {
           try {
             return JSON.parse(seg.Document);
           } catch {
@@ -308,17 +374,17 @@ async function getAlarms(event) {
     );
 
     const alarms = (response.MetricAlarms || []).map((alarm) => ({
-      name: alarm.AlarmName,
-      description: alarm.AlarmDescription,
-      state: alarm.StateValue,
-      stateReason: alarm.StateReason,
-      stateUpdatedTimestamp: alarm.StateUpdatedTimestamp,
-      metricName: alarm.MetricName,
-      namespace: alarm.Namespace,
-      threshold: alarm.Threshold,
-      comparisonOperator: alarm.ComparisonOperator,
-      evaluationPeriods: alarm.EvaluationPeriods,
-      datapointsToAlarm: alarm.DatapointsToAlarm,
+      AlarmName: alarm.AlarmName,
+      AlarmDescription: alarm.AlarmDescription,
+      StateValue: alarm.StateValue,
+      StateReason: alarm.StateReason,
+      StateUpdatedTimestamp: alarm.StateUpdatedTimestamp,
+      MetricName: alarm.MetricName,
+      Namespace: alarm.Namespace,
+      Threshold: alarm.Threshold,
+      ComparisonOperator: alarm.ComparisonOperator,
+      EvaluationPeriods: alarm.EvaluationPeriods,
+      DatapointsToAlarm: alarm.DatapointsToAlarm,
     }));
 
     return createResponse(200, {
@@ -326,9 +392,9 @@ async function getAlarms(event) {
       alarms,
       summary: {
         total: alarms.length,
-        ok: alarms.filter((a) => a.state === 'OK').length,
-        alarm: alarms.filter((a) => a.state === 'ALARM').length,
-        insufficient: alarms.filter((a) => a.state === 'INSUFFICIENT_DATA')
+        ok: alarms.filter((a) => a.StateValue === 'OK').length,
+        alarm: alarms.filter((a) => a.StateValue === 'ALARM').length,
+        insufficient: alarms.filter((a) => a.StateValue === 'INSUFFICIENT_DATA')
           .length,
       },
     });

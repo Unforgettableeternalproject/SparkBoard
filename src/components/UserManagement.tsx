@@ -40,7 +40,7 @@ interface CognitoUser {
   UserStatus: string
   Enabled: boolean
   UserCreateDate: string
-  UserGroups?: string[]
+  Groups?: string[]
 }
 
 export function UserManagement() {
@@ -51,64 +51,167 @@ export function UserManagement() {
 
   const API_URL = import.meta.env.VITE_API_URL
 
-  // Fetch users from Cognito (需要後端 API 支援)
-  const { data: users = [], isLoading } = useQuery({
+  // Fetch users from Cognito
+  const { data: usersData, isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/admin/users`, {
+      console.log('Fetching users from:', `${API_URL}/users`)
+      const response = await fetch(`${API_URL}/users`, {
         headers: {
           Authorization: idToken || '',
         },
       })
-      if (!response.ok) throw new Error('Failed to fetch users')
-      return response.json() as Promise<CognitoUser[]>
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to fetch users:', response.status, errorText)
+        throw new Error(`Failed to fetch users: ${response.status}`)
+      }
+      const data = await response.json()
+      console.log('Users response:', data)
+      return data.users as CognitoUser[]
     },
     enabled: !!idToken,
   })
 
-  // Update user role
-  const updateRoleMutation = useMutation({
-    mutationFn: async ({ username, group }: { username: string; group: string }) => {
-      const response = await fetch(`${API_URL}/admin/users/${username}/role`, {
-        method: 'PUT',
+  const users = usersData || []
+
+  // Add user to group
+  const addToGroupMutation = useMutation({
+    mutationFn: async ({ username, groupName }: { username: string; groupName: string }) => {
+      console.log('Adding user to group:', username, groupName)
+      const response = await fetch(`${API_URL}/users/add-to-group`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: idToken || '',
         },
-        body: JSON.stringify({ group }),
+        body: JSON.stringify({ username, groupName }),
       })
-      if (!response.ok) throw new Error('Failed to update role')
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to add to group:', errorText)
+        throw new Error('Failed to add user to group')
+      }
       return response.json()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User role updated successfully')
+      toast.success('User added to group successfully')
     },
     onError: (error) => {
-      toast.error(`Failed to update role: ${error.message}`)
+      toast.error(`Failed to add to group: ${error.message}`)
     },
   })
 
-  // Ban/Unban user
-  const toggleUserStatusMutation = useMutation({
-    mutationFn: async ({ username, enable }: { username: string; enable: boolean }) => {
-      const response = await fetch(`${API_URL}/admin/users/${username}/status`, {
-        method: 'PUT',
+  // Remove user from group
+  const removeFromGroupMutation = useMutation({
+    mutationFn: async ({ username, groupName }: { username: string; groupName: string }) => {
+      console.log('Removing user from group:', username, groupName)
+      const response = await fetch(`${API_URL}/users/remove-from-group`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: idToken || '',
         },
-        body: JSON.stringify({ enable }),
+        body: JSON.stringify({ username, groupName }),
       })
-      if (!response.ok) throw new Error('Failed to update user status')
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to remove from group:', errorText)
+        throw new Error('Failed to remove user from group')
+      }
       return response.json()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success('User status updated successfully')
+      toast.success('User removed from group successfully')
     },
     onError: (error) => {
-      toast.error(`Failed to update status: ${error.message}`)
+      toast.error(`Failed to remove from group: ${error.message}`)
+    },
+  })
+
+  // Disable user
+  const disableUserMutation = useMutation({
+    mutationFn: async (username: string) => {
+      console.log('Disabling user:', username)
+      const response = await fetch(`${API_URL}/users/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: idToken || '',
+        },
+        body: JSON.stringify({ username }),
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to disable user:', errorText)
+        throw new Error('Failed to disable user')
+      }
+      return response.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User disabled successfully')
+    },
+    onError: (error) => {
+      toast.error(`Failed to disable user: ${error.message}`)
+    },
+  })
+
+  // Enable user
+  const enableUserMutation = useMutation({
+    mutationFn: async (username: string) => {
+      console.log('Enabling user:', username)
+      const response = await fetch(`${API_URL}/users/enable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: idToken || '',
+        },
+        body: JSON.stringify({ username }),
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to enable user:', errorText)
+        throw new Error('Failed to enable user')
+      }
+      return response.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User enabled successfully')
+    },
+    onError: (error) => {
+      toast.error(`Failed to enable user: ${error.message}`)
+    },
+  })
+
+  // Delete user
+  const deleteUserMutation = useMutation({
+    mutationFn: async (username: string) => {
+      console.log('Deleting user:', username)
+      const response = await fetch(`${API_URL}/users`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: idToken || '',
+        },
+        body: JSON.stringify({ username }),
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to delete user:', errorText)
+        throw new Error('Failed to delete user')
+      }
+      return response.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User deleted successfully')
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete user: ${error.message}`)
     },
   })
 
@@ -187,7 +290,7 @@ export function UserManagement() {
               <TableRow>
                 <TableHead>User</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead>Groups</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -203,7 +306,8 @@ export function UserManagement() {
                 filteredUsers.map((user) => {
                   const email = user.Attributes.find((attr) => attr.Name === 'email')?.Value || ''
                   const name = user.Attributes.find((attr) => attr.Name === 'name')?.Value || user.Username
-                  const currentGroup = user.UserGroups?.[0] || 'Users'
+                  const userGroups = user.Groups || []
+                  const primaryGroup = userGroups[0] || 'Users'
 
                   return (
                     <TableRow key={user.Username}>
@@ -218,36 +322,19 @@ export function UserManagement() {
                       </TableCell>
                       <TableCell>{email}</TableCell>
                       <TableCell>
-                        <Select
-                          value={currentGroup}
-                          onValueChange={(value) =>
-                            updateRoleMutation.mutate({ username: user.Username, group: value })
-                          }
-                        >
-                          <SelectTrigger className="w-[140px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Admin">
-                              <div className="flex items-center gap-2">
-                                <ShieldCheck size={14} />
-                                Admin
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="Moderators">
-                              <div className="flex items-center gap-2">
-                                <ShieldCheck size={14} />
-                                Moderators
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="Users">
-                              <div className="flex items-center gap-2">
-                                <UserCircle size={14} />
-                                Users
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex flex-wrap gap-1">
+                          {userGroups.length > 0 ? (
+                            userGroups.map((group) => (
+                              <Badge key={group} variant={getRoleColor(group)} className="text-xs">
+                                {group}
+                              </Badge>
+                            ))
+                          ) : (
+                            <Badge variant="outline" className="text-xs">
+                              None
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={user.Enabled ? 'default' : 'destructive'} className="text-xs">
@@ -255,49 +342,100 @@ export function UserManagement() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant={user.Enabled ? 'destructive' : 'default'}
-                              size="sm"
-                              disabled={updateRoleMutation.isPending || toggleUserStatusMutation.isPending}
-                            >
-                              {user.Enabled ? (
-                                <>
-                                  <Warning size={14} className="mr-1" />
-                                  Ban
-                                </>
-                              ) : (
-                                'Enable'
+                        <div className="flex gap-1 justify-end flex-wrap">
+                          {/* Add to Group */}
+                          <Select
+                            value=""
+                            onValueChange={(groupName) => {
+                              if (groupName) {
+                                addToGroupMutation.mutate({ username: user.Username, groupName })
+                              }
+                            }}
+                            disabled={addToGroupMutation.isPending || removeFromGroupMutation.isPending}
+                          >
+                            <SelectTrigger className="w-[100px] h-8 text-xs">
+                              <SelectValue placeholder="Add to..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {!userGroups.includes('Admin') && (
+                                <SelectItem value="Admin">
+                                  <div className="flex items-center gap-2">
+                                    <ShieldCheck size={12} />
+                                    Admin
+                                  </div>
+                                </SelectItem>
                               )}
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                {user.Enabled ? 'Ban User?' : 'Enable User?'}
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                {user.Enabled
-                                  ? `Are you sure you want to ban ${name}? They will not be able to access the system.`
-                                  : `Are you sure you want to enable ${name}? They will regain access to the system.`}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() =>
-                                  toggleUserStatusMutation.mutate({
-                                    username: user.Username,
-                                    enable: !user.Enabled,
-                                  })
+                              {!userGroups.includes('Moderators') && (
+                                <SelectItem value="Moderators">
+                                  <div className="flex items-center gap-2">
+                                    <ShieldCheck size={12} />
+                                    Moderators
+                                  </div>
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          
+                          {/* Remove from Group */}
+                          {userGroups.length > 0 && (
+                            <Select
+                              value=""
+                              onValueChange={(groupName) => {
+                                if (groupName) {
+                                  removeFromGroupMutation.mutate({ username: user.Username, groupName })
                                 }
-                              >
-                                Confirm
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                              }}
+                              disabled={addToGroupMutation.isPending || removeFromGroupMutation.isPending}
+                            >
+                              <SelectTrigger className="w-[120px] h-8 text-xs">
+                                <SelectValue placeholder="Remove..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {userGroups.map((group) => (
+                                  <SelectItem key={group} value={group}>
+                                    Remove {group}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+
+                          {/* Enable/Disable User */}
+                          <Button
+                            variant={user.Enabled ? 'outline' : 'default'}
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => {
+                              if (user.Enabled) {
+                                if (confirm(`Are you sure you want to disable ${name}?`)) {
+                                  disableUserMutation.mutate(user.Username)
+                                }
+                              } else {
+                                enableUserMutation.mutate(user.Username)
+                              }
+                            }}
+                            disabled={disableUserMutation.isPending || enableUserMutation.isPending}
+                          >
+                            {user.Enabled ? 'Disable' : 'Enable'}
+                          </Button>
+
+                          {/* Delete User (only if disabled) */}
+                          {!user.Enabled && (
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              className="h-8 text-xs"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to permanently delete ${name}? This action cannot be undone.`)) {
+                                  deleteUserMutation.mutate(user.Username)
+                                }
+                              }}
+                              disabled={deleteUserMutation.isPending}
+                            >
+                              Delete
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )

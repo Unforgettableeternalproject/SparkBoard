@@ -11,6 +11,9 @@ const {
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
   AdminListGroupsForUserCommand,
+  AdminDisableUserCommand,
+  AdminEnableUserCommand,
+  AdminDeleteUserCommand,
 } = require('@aws-sdk/client-cognito-identity-provider');
 
 const cognitoClient = new CognitoIdentityProviderClient({});
@@ -51,6 +54,14 @@ function getUserFromEvent(event) {
     groups,
     isAdmin: groups.includes('Admin'),
   };
+}
+
+/**
+ * Check if user has admin permission
+ */
+function checkAdminPermission(event) {
+  const user = getUserFromEvent(event);
+  return user && user.isAdmin;
 }
 
 /**
@@ -244,6 +255,179 @@ async function removeUserFromGroup(event) {
 }
 
 /**
+ * Disable user
+ * POST /users/disable
+ * Body: { username: string }
+ */
+async function disableUser(event) {
+  console.log('disableUser invoked');
+
+  // Check admin permission
+  const hasPermission = checkAdminPermission(event);
+  if (!hasPermission) {
+    return createResponse(403, {
+      error: 'Forbidden',
+      message: 'Only administrators can disable users',
+    });
+  }
+
+  const body = JSON.parse(event.body || '{}');
+  const { username } = body;
+
+  if (!username) {
+    return createResponse(400, {
+      error: 'ValidationError',
+      message: 'Username is required',
+    });
+  }
+
+  try {
+    const command = new AdminDisableUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    });
+
+    await cognitoClient.send(command);
+
+    console.log(`User ${username} disabled successfully`);
+    return createResponse(200, {
+      message: 'User disabled successfully',
+      username,
+    });
+  } catch (error) {
+    console.error('Error disabling user:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to disable user',
+      details: error.message,
+    });
+  }
+}
+
+/**
+ * Enable user
+ * POST /users/enable
+ * Body: { username: string }
+ */
+async function enableUser(event) {
+  console.log('enableUser invoked');
+
+  // Check admin permission
+  const hasPermission = checkAdminPermission(event);
+  if (!hasPermission) {
+    return createResponse(403, {
+      error: 'Forbidden',
+      message: 'Only administrators can enable users',
+    });
+  }
+
+  const body = JSON.parse(event.body || '{}');
+  const { username } = body;
+
+  if (!username) {
+    return createResponse(400, {
+      error: 'ValidationError',
+      message: 'Username is required',
+    });
+  }
+
+  try {
+    const command = new AdminEnableUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    });
+
+    await cognitoClient.send(command);
+
+    console.log(`User ${username} enabled successfully`);
+    return createResponse(200, {
+      message: 'User enabled successfully',
+      username,
+    });
+  } catch (error) {
+    console.error('Error enabling user:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to enable user',
+      details: error.message,
+    });
+  }
+}
+
+/**
+ * Delete user (only if disabled)
+ * DELETE /users
+ * Body: { username: string }
+ */
+async function deleteUser(event) {
+  console.log('deleteUser invoked');
+
+  // Check admin permission
+  const hasPermission = checkAdminPermission(event);
+  if (!hasPermission) {
+    return createResponse(403, {
+      error: 'Forbidden',
+      message: 'Only administrators can delete users',
+    });
+  }
+
+  const body = JSON.parse(event.body || '{}');
+  const { username } = body;
+
+  if (!username) {
+    return createResponse(400, {
+      error: 'ValidationError',
+      message: 'Username is required',
+    });
+  }
+
+  try {
+    // First, check if user is disabled
+    const listCommand = new ListUsersCommand({
+      UserPoolId: USER_POOL_ID,
+      Filter: `username = "${username}"`,
+    });
+    const listResult = await cognitoClient.send(listCommand);
+    
+    if (!listResult.Users || listResult.Users.length === 0) {
+      return createResponse(404, {
+        error: 'NotFound',
+        message: 'User not found',
+      });
+    }
+
+    const user = listResult.Users[0];
+    if (user.Enabled !== false) {
+      return createResponse(400, {
+        error: 'ValidationError',
+        message: 'User must be disabled before deletion',
+      });
+    }
+
+    // Delete the user
+    const deleteCommand = new AdminDeleteUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    });
+
+    await cognitoClient.send(deleteCommand);
+
+    console.log(`User ${username} deleted successfully`);
+    return createResponse(200, {
+      message: 'User deleted successfully',
+      username,
+    });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    return createResponse(500, {
+      error: 'InternalServerError',
+      message: 'Failed to delete user',
+      details: error.message,
+    });
+  }
+}
+
+/**
  * Main Lambda handler
  */
 exports.handler = async (event) => {
@@ -269,6 +453,16 @@ exports.handler = async (event) => {
           return await addUserToGroup(event);
         } else if (resource === '/users/remove-from-group') {
           return await removeUserFromGroup(event);
+        } else if (resource === '/users/disable') {
+          return await disableUser(event);
+        } else if (resource === '/users/enable') {
+          return await enableUser(event);
+        }
+        break;
+
+      case 'DELETE':
+        if (resource === '/users') {
+          return await deleteUser(event);
         }
         break;
 

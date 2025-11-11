@@ -142,6 +142,9 @@ export class ApiStack extends cdk.Stack {
         'cognito-idp:AdminAddUserToGroup',
         'cognito-idp:AdminRemoveUserFromGroup',
         'cognito-idp:AdminGetUser',
+        'cognito-idp:AdminDisableUser',
+        'cognito-idp:AdminEnableUser',
+        'cognito-idp:AdminDeleteUser',
       ],
       resources: [userPool.userPoolArn],
     }));
@@ -392,6 +395,44 @@ export class ApiStack extends cdk.Stack {
     const removeFromGroupResource = usersResource.addResource('remove-from-group');
     removeFromGroupResource.addMethod(
       'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/disable (requires Cognito JWT + Admin role)
+    const disableUserResource = usersResource.addResource('disable');
+    disableUserResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // POST /users/enable (requires Cognito JWT + Admin role)
+    const enableUserResource = usersResource.addResource('enable');
+    enableUserResource.addMethod(
+      'POST',
+      new apigateway.LambdaIntegration(usersFunction, {
+        proxy: true,
+      }),
+      {
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+        authorizer: cognitoAuthorizer,
+      }
+    );
+
+    // DELETE /users (requires Cognito JWT + Admin role)
+    usersResource.addMethod(
+      'DELETE',
       new apigateway.LambdaIntegration(usersFunction, {
         proxy: true,
       }),
