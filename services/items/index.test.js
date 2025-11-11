@@ -13,6 +13,7 @@ process.env.NODE_ENV = 'test';
 const mockPut = jest.fn();
 const mockQuery = jest.fn();
 const mockDelete = jest.fn();
+const mockUpdate = jest.fn();
 
 jest.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: jest.fn(() => ({})),
@@ -31,6 +32,9 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
         if (command.constructor.name === 'DeleteCommand') {
           return mockDelete(command);
         }
+        if (command.constructor.name === 'UpdateCommand') {
+          return mockUpdate(command);
+        }
       }),
     })),
   },
@@ -45,6 +49,11 @@ jest.mock('@aws-sdk/lib-dynamodb', () => ({
     }
   },
   DeleteCommand: class DeleteCommand {
+    constructor(input) {
+      this.input = input;
+    }
+  },
+  UpdateCommand: class UpdateCommand {
     constructor(input) {
       this.input = input;
     }
@@ -168,6 +177,74 @@ describe('Items Lambda Handler', () => {
 
       expect(response.statusCode).toBe(500);
       expect(body.error).toBe('InternalServerError');
+    });
+
+    test('should create announcement as moderator', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Important Announcement',
+        content: 'This is an important announcement',
+        type: 'announcement',
+        priority: 'high',
+        expiresAt: '2025-12-31T23:59:59Z',
+      });
+      // Change from Admin to Moderators
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('announcement');
+      expect(body.item.priority).toBe('high');
+      expect(body.item.expiresAt).toBe('2025-12-31T23:59:59Z');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject announcement creation by regular user', async () => {
+      const event = createMockEvent('POST', {
+        title: 'Unauthorized Announcement',
+        content: 'This should fail',
+        type: 'announcement',
+      });
+      // Regular user (no groups)
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(body.message).toContain('moderators and admins');
+      expect(mockPut).not.toHaveBeenCalled();
+    });
+
+    test('should create task with subtasks and deadline', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Project Task',
+        content: 'Complete the project',
+        type: 'task',
+        deadline: '2025-06-30T17:00:00Z',
+        subtasks: [
+          { id: 'st-1', title: 'Design mockup', completed: false },
+          { id: 'st-2', title: 'Implement feature', completed: false },
+        ],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('task');
+      expect(body.item.status).toBe('active');
+      expect(body.item.deadline).toBe('2025-06-30T17:00:00Z');
+      expect(body.item.subtasks).toHaveLength(2);
+      expect(mockPut).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -410,13 +487,353 @@ describe('Items Lambda Handler', () => {
 
   describe('Unsupported methods', () => {
     test('should reject unsupported HTTP methods', async () => {
-      const event = createMockEvent('PATCH');
+      const event = createMockEvent('PUT');
 
       const response = await handler(event);
       const body = JSON.parse(response.body);
 
       expect(response.statusCode).toBe(405);
       expect(body.error).toBe('MethodNotAllowed');
+    });
+  });
+
+  describe('Permission System Tests', () => {
+    test('should allow admin to create announcement', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Admin Announcement',
+        content: 'Important message',
+        type: 'announcement',
+        priority: 'urgent',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Admin';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('announcement');
+      expect(body.item.priority).toBe('urgent');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should allow regular user to create task', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'User Task',
+        content: 'My personal task',
+        type: 'task',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.success).toBe(true);
+      expect(body.item.type).toBe('task');
+      expect(body.item.status).toBe('active');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should delete announcement as moderator', async () => {
+      const event = createMockEvent('DELETE', null, null, { sk: 'ITEM#announcement-123' });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#announcement-123',
+          type: 'announcement',
+          userId: 'other-user-456',
+        }],
+      });
+
+      mockDelete.mockResolvedValue({});
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject regular user deleting other user task', async () => {
+      const event = createMockEvent('DELETE', null, null, { sk: 'ITEM#task-123' });
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'other-user-456',
+        }],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Field Validation Tests', () => {
+    test('should create task with default empty subtasks', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Simple Task',
+        content: 'No subtasks specified',
+        type: 'task',
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.item.subtasks).toEqual([]);
+      expect(body.item.status).toBe('active');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should create announcement with default priority normal', async () => {
+      mockPut.mockResolvedValue({});
+
+      const event = createMockEvent('POST', {
+        title: 'Normal Announcement',
+        content: 'Regular message',
+        type: 'announcement',
+      });
+      event.requestContext.authorizer.claims['cognito:groups'] = 'Moderators';
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(201);
+      expect(body.item.priority).toBe('normal');
+      expect(body.item.type).toBe('announcement');
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    });
+
+    test('should return items with new fields in GET response', async () => {
+      const mockItems = [
+        {
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-1',
+          itemId: 'task-1',
+          orgId: 'test-org',
+          userId: 'user-1',
+          username: 'user1',
+          title: 'Task with subtasks',
+          content: 'Test content',
+          type: 'task',
+          status: 'active',
+          subtasks: [{ id: 'st-1', title: 'Subtask 1', completed: false }],
+          deadline: '2025-12-31T23:59:59Z',
+          attachments: [],
+          createdAt: '2025-01-01T00:00:00Z',
+          updatedAt: '2025-01-01T00:00:00Z',
+        },
+        {
+          PK: 'ORG#test-org',
+          SK: 'ITEM#announcement-1',
+          itemId: 'announcement-1',
+          orgId: 'test-org',
+          userId: 'user-2',
+          username: 'user2',
+          title: 'Important announcement',
+          content: 'Urgent message',
+          type: 'announcement',
+          priority: 'high',
+          expiresAt: '2025-06-30T00:00:00Z',
+          attachments: [],
+          createdAt: '2025-01-02T00:00:00Z',
+          updatedAt: '2025-01-02T00:00:00Z',
+        },
+      ];
+
+      mockQuery.mockResolvedValue({
+        Items: mockItems,
+        LastEvaluatedKey: null,
+      });
+
+      const event = createMockEvent('GET');
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.items).toHaveLength(2);
+      
+      // Verify task fields
+      expect(body.items[0].type).toBe('task');
+      expect(body.items[0].subtasks).toHaveLength(1);
+      expect(body.items[0].deadline).toBe('2025-12-31T23:59:59Z');
+      expect(body.items[0].status).toBe('active');
+      
+      // Verify announcement fields
+      expect(body.items[1].type).toBe('announcement');
+      expect(body.items[1].priority).toBe('high');
+      expect(body.items[1].expiresAt).toBe('2025-06-30T00:00:00Z');
+      
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('PATCH /items/{sk}', () => {
+    beforeEach(() => {
+      mockQuery.mockClear();
+      mockUpdate.mockClear();
+    });
+
+    test('should update task status to completed', async () => {
+      const event = createMockEvent('PATCH', {
+        status: 'completed',
+      }, null, { sk: 'ITEM#task-123' });
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'test-user-123',
+          status: 'active',
+        }],
+      });
+
+      mockUpdate.mockResolvedValue({
+        Attributes: {
+          itemId: 'task-123',
+          pk: 'ORG#test-org',
+          sk: 'ITEM#task-123',
+          type: 'task',
+          status: 'completed',
+          completedAt: '2025-10-29T12:00:00Z',
+          username: 'testuser',
+          title: 'Test Task',
+          content: 'Test content',
+          createdAt: '2025-10-29T10:00:00Z',
+          updatedAt: '2025-10-29T12:00:00Z',
+          subtasks: [],
+          attachments: [],
+        },
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.item.status).toBe('completed');
+      expect(body.item.completedAt).toBeDefined();
+      expect(mockQuery).toHaveBeenCalledTimes(1);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should update subtasks and auto-complete task when all done', async () => {
+      const event = createMockEvent('PATCH', {
+        subtasks: [
+          { id: 'st-1', title: 'Subtask 1', completed: true },
+          { id: 'st-2', title: 'Subtask 2', completed: true },
+        ],
+      }, null, { sk: 'ITEM#task-123' });
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'test-user-123',
+          status: 'active',
+        }],
+      });
+
+      mockUpdate.mockResolvedValue({
+        Attributes: {
+          itemId: 'task-123',
+          pk: 'ORG#test-org',
+          sk: 'ITEM#task-123',
+          type: 'task',
+          status: 'completed',
+          subtasks: [
+            { id: 'st-1', title: 'Subtask 1', completed: true },
+            { id: 'st-2', title: 'Subtask 2', completed: true },
+          ],
+          completedAt: '2025-10-29T12:00:00Z',
+          username: 'testuser',
+          title: 'Test Task',
+          content: 'Test content',
+          createdAt: '2025-10-29T10:00:00Z',
+          updatedAt: '2025-10-29T12:00:00Z',
+          attachments: [],
+        },
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.item.subtasks).toHaveLength(2);
+      expect(body.item.subtasks.every(st => st.completed)).toBe(true);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should reject update without sk parameter', async () => {
+      const event = createMockEvent('PATCH', { status: 'completed' });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(400);
+      expect(body.error).toBe('BadRequest');
+      expect(body.message).toContain('Item SK is required');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test('should reject update of other user item', async () => {
+      const event = createMockEvent('PATCH', {
+        status: 'completed',
+      }, null, { sk: 'ITEM#task-123' });
+      // Change to non-admin user
+      event.requestContext.authorizer.claims['cognito:groups'] = '';
+
+      mockQuery.mockResolvedValue({
+        Items: [{
+          PK: 'ORG#test-org',
+          SK: 'ITEM#task-123',
+          type: 'task',
+          userId: 'other-user-456',
+        }],
+      });
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(403);
+      expect(body.error).toBe('Forbidden');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    test('should reject update without authorization', async () => {
+      const event = createMockEvent('PATCH', { status: 'completed' }, null, { sk: 'ITEM#task-123' });
+      delete event.requestContext.authorizer;
+
+      const response = await handler(event);
+      const body = JSON.parse(response.body);
+
+      expect(response.statusCode).toBe(401);
+      expect(body.error).toBe('Unauthorized');
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 });

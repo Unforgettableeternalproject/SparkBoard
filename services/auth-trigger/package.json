@@ -1,0 +1,9 @@
+{
+  "name": "sparkboard-auth-trigger",
+  "version": "1.0.0",
+  "description": "Cognito post confirmation trigger to auto-assign user groups",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.485.0"
+  }
+}

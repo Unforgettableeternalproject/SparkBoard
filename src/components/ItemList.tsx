@@ -1,16 +1,27 @@
-import { SparkItem } from '@/lib/types'
+import { SparkItem, User, CreateItemInput } from '@/lib/types'
 import { ItemCard } from './ItemCard'
 import { CreateItemDialog } from './CreateItemDialog'
-import { CreateItemInput } from '@/lib/types'
 import { FileText } from '@phosphor-icons/react'
 
 interface ItemListProps {
   items: SparkItem[]
+  currentUser: User
   onCreateItem: (input: CreateItemInput) => void
+  onDeleteItem: (itemSk: string) => void
+  onUpdateItem: (itemSk: string, updates: Partial<SparkItem>) => void
 }
 
-export function ItemList({ items, onCreateItem }: ItemListProps) {
-  if (items.length === 0) {
+export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpdateItem }: ItemListProps) {
+  // Filter out archived tasks
+  const activeItems = items.filter(item => {
+    // Keep all announcements
+    if (item.type === 'announcement') return true
+    // Filter out archived tasks
+    if (item.type === 'task' && item.archivedAt) return false
+    return true
+  })
+
+  if (activeItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4">
         <div className="text-center space-y-4 max-w-md">
@@ -23,7 +34,7 @@ export function ItemList({ items, onCreateItem }: ItemListProps) {
           <p className="text-sm text-muted-foreground">
             Create your first task or announcement to get started with SparkBoard
           </p>
-          <CreateItemDialog onCreateItem={onCreateItem} />
+          <CreateItemDialog onCreateItem={onCreateItem} userGroups={currentUser?.['cognito:groups'] || []} />
         </div>
       </div>
     )
@@ -35,15 +46,21 @@ export function ItemList({ items, onCreateItem }: ItemListProps) {
         <div>
           <h2 className="text-xl font-semibold">Items</h2>
           <p className="text-sm text-muted-foreground">
-            {items.length} {items.length === 1 ? 'item' : 'items'} in your organization
+            {activeItems.length} {activeItems.length === 1 ? 'item' : 'items'} in your organization
           </p>
         </div>
-        <CreateItemDialog onCreateItem={onCreateItem} />
+        <CreateItemDialog onCreateItem={onCreateItem} userGroups={currentUser?.['cognito:groups'] || []} />
       </div>
 
       <div className="grid gap-4">
-        {items.map((item) => (
-          <ItemCard key={item.id} item={item} />
+        {activeItems.map((item) => (
+          <ItemCard 
+            key={item.id} 
+            item={item} 
+            currentUser={currentUser}
+            onDelete={onDeleteItem}
+            onUpdate={onUpdateItem}
+          />
         ))}
       </div>
     </div>

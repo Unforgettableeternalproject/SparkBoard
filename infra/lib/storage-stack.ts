@@ -59,7 +59,13 @@ export class StorageStack extends cdk.Stack {
     this.bucket = new s3.Bucket(this, 'SparkBoardFiles', {
       bucketName: `sparkboard-files-${this.account}-${this.region}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      blockPublicAccess: new s3.BlockPublicAccess({
+        blockPublicAcls: false,
+        blockPublicPolicy: false,
+        ignorePublicAcls: false,
+        restrictPublicBuckets: false,
+      }),
+      publicReadAccess: true, // Allow public read for user avatars
       removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev only
       autoDeleteObjects: true, // For dev only - removes all objects on stack deletion
       versioned: false,

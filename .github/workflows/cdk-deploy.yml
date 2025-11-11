@@ -134,7 +134,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         continue-on-error: true
       
-      - name: CDK Deploy
+      - name: CDK Deploy Infrastructure
         run: |
           cd infra
           npx cdk deploy --all \
@@ -142,20 +142,111 @@ jobs:
             --progress events \
             --outputs-file ../cdk-outputs.json
           
-          echo "✅ Deployment successful"
+          echo "✅ Infrastructure deployment successful"
       
-      - name: Extract API Endpoint
-        id: api-endpoint
+      - name: Extract Deployment Outputs
+        id: outputs
         run: |
           if [ -f cdk-outputs.json ]; then
             API_URL=$(jq -r '.["SparkBoard-Api"].ApiEndpoint // empty' cdk-outputs.json)
-            if [ -n "$API_URL" ]; then
-              echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-              echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**API Endpoint:** $API_URL" >> $GITHUB_STEP_SUMMARY
-            fi
+            USER_POOL_ID=$(jq -r '.["SparkBoard-Auth"].UserPoolId // empty' cdk-outputs.json)
+            USER_POOL_CLIENT_ID=$(jq -r '.["SparkBoard-Auth"].UserPoolClientId // empty' cdk-outputs.json)
+            COGNITO_DOMAIN=$(jq -r '.["SparkBoard-Auth"].CognitoDomain // empty' cdk-outputs.json)
+            FRONTEND_BUCKET=$(jq -r '.["SparkBoard-Frontend"].BucketName // empty' cdk-outputs.json)
+            CLOUDFRONT_DIST_ID=$(jq -r '.["SparkBoard-Frontend"].DistributionId // empty' cdk-outputs.json)
+            CLOUDFRONT_URL=$(jq -r '.["SparkBoard-Frontend"].WebsiteURL // empty' cdk-outputs.json)
+            AWS_REGION="${{ vars.AWS_REGION || 'us-east-1' }}"
+            
+            echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+            echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+            echo "user_pool_client_id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+            echo "cognito_domain=$COGNITO_DOMAIN" >> $GITHUB_OUTPUT
+            echo "frontend_bucket=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
+            echo "cloudfront_dist_id=$CLOUDFRONT_DIST_ID" >> $GITHUB_OUTPUT
+            echo "cloudfront_url=$CLOUDFRONT_URL" >> $GITHUB_OUTPUT
+            echo "aws_region=$AWS_REGION" >> $GITHUB_OUTPUT
+            
+            echo "## 🚀 Infrastructure Deployment Complete" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| API Endpoint | \`$API_URL\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| User Pool ID | \`$USER_POOL_ID\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| CloudFront URL | \`$CLOUDFRONT_URL\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| AWS Region | \`$AWS_REGION\` |" >> $GITHUB_STEP_SUMMARY
           fi
+      
+      - name: Build Frontend
+        run: |
+          echo "Building frontend with production environment variables..."
+          
+          # Create .env.production file
+          cat > .env.production << EOF
+          VITE_API_URL=${{ steps.outputs.outputs.api_url }}
+          VITE_USER_POOL_ID=${{ steps.outputs.outputs.user_pool_id }}
+          VITE_USER_POOL_CLIENT_ID=${{ steps.outputs.outputs.user_pool_client_id }}
+          VITE_COGNITO_DOMAIN=${{ steps.outputs.outputs.cognito_domain }}
+          VITE_AWS_REGION=${{ steps.outputs.outputs.aws_region }}
+          VITE_OAUTH_REDIRECT_SIGN_IN=${{ steps.outputs.outputs.cloudfront_url }}
+          VITE_OAUTH_REDIRECT_SIGN_OUT=${{ steps.outputs.outputs.cloudfront_url }}
+          EOF
+          
+          # Build frontend
+          npm ci
+          npm run build
+          
+          echo "✅ Frontend build successful"
+      
+      - name: Deploy Frontend to S3
+        run: |
+          BUCKET_NAME="${{ steps.outputs.outputs.frontend_bucket }}"
+          
+          if [ -z "$BUCKET_NAME" ]; then
+            echo "⚠️  Frontend bucket name not found, skipping frontend deployment"
+            exit 0
+          fi
+          
+          echo "Deploying frontend to S3 bucket: $BUCKET_NAME"
+          
+          # Upload to S3 with cache control
+          aws s3 sync dist/ s3://$BUCKET_NAME/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "index.html" \
+            --exclude "*.json"
+          
+          # Upload index.html without caching
+          aws s3 cp dist/index.html s3://$BUCKET_NAME/index.html \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html"
+          
+          echo "✅ Frontend uploaded to S3"
+      
+      - name: Invalidate CloudFront Cache
+        run: |
+          DIST_ID="${{ steps.outputs.outputs.cloudfront_dist_id }}"
+          
+          if [ -z "$DIST_ID" ]; then
+            echo "⚠️  CloudFront distribution ID not found, skipping cache invalidation"
+            exit 0
+          fi
+          
+          echo "Creating CloudFront invalidation for distribution: $DIST_ID"
+          
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id $DIST_ID \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          
+          echo "Invalidation created: $INVALIDATION_ID"
+          echo "✅ CloudFront cache invalidated"
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🌐 Frontend Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Website URL:** ${{ steps.outputs.outputs.cloudfront_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**CloudFront Invalidation:** \`$INVALIDATION_ID\`" >> $GITHUB_STEP_SUMMARY
       
       - name: Upload CDK outputs
         uses: actions/upload-artifact@v4

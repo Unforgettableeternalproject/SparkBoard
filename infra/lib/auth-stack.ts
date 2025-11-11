@@ -1,6 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as path from 'path';
 
 export class AuthStack extends cdk.Stack {
   public readonly userPool: cognito.UserPool;
@@ -48,59 +51,58 @@ export class AuthStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev only
     });
 
-    // Hosted UI Domain
-    const domain = this.userPool.addDomain('SparkBoardDomain', {
-      cognitoDomain: {
-        domainPrefix: `sparkboard-${this.account}`, // Must be globally unique
-      },
-    });
-
-    // Admin User Group
-    const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
-      userPoolId: this.userPool.userPoolId,
-      groupName: 'Admin',
-      description: 'Administrators with full system access including monitoring',
-      precedence: 1,
-    });
-
-    // User Pool Client (for frontend)
+    // User Pool Client (for frontend) - simplified without OAuth to avoid circular dependency
     this.userPoolClient = new cognito.UserPoolClient(this, 'SparkBoardWebClient', {
       userPool: this.userPool,
       userPoolClientName: 'SparkBoardWebClient',
       authFlows: {
         userPassword: true,
         userSrp: true,
-        adminUserPassword: true, // Enable ADMIN_NO_SRP_AUTH for testing
+        adminUserPassword: true,
       },
-      generateSecret: false, // Public client (frontend)
+      generateSecret: false,
       preventUserExistenceErrors: true,
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
-      oAuth: {
-        flows: {
-          authorizationCodeGrant: true,
-          implicitCodeGrant: false, // Not recommended for security
-        },
-        scopes: [
-          cognito.OAuthScope.EMAIL,
-          cognito.OAuthScope.OPENID,
-          cognito.OAuthScope.PROFILE,
-        ],
-        callbackUrls: [
-          'http://localhost:5173',
-          'http://localhost:5173/',
-          'http://localhost:5173/callback',
-        ],
-        logoutUrls: [
-          'http://localhost:5173',
-          'http://localhost:5173/',
-        ],
-      },
-      supportedIdentityProviders: [
-        cognito.UserPoolClientIdentityProvider.COGNITO,
-      ],
     });
+
+    // Hosted UI Domain
+    const domain = this.userPool.addDomain('SparkBoardDomain', {
+      cognitoDomain: {
+        domainPrefix: `sparkboard-${this.account}`,
+      },
+    });
+
+    // Admin User Group
+    new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+      userPoolId: this.userPool.userPoolId,
+      groupName: 'Admin',
+      description: 'Administrators with full system access including monitoring',
+      precedence: 1,
+    });
+
+    // Post Confirmation Lambda Trigger
+    const postConfirmTrigger = new lambda.Function(this, 'PostConfirmTrigger', {
+      functionName: 'SparkBoard-PostConfirm',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/auth-trigger')),
+      environment: {
+        USER_POOL_ID: this.userPool.userPoolId,
+      },
+      timeout: cdk.Duration.seconds(10),
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Grant permissions to add users to groups
+    postConfirmTrigger.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:AdminAddUserToGroup'],
+      resources: [this.userPool.userPoolArn],
+    }));
+
+    // Attach trigger to User Pool
+    this.userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, postConfirmTrigger);
 
     // Outputs
     new cdk.CfnOutput(this, 'UserPoolId', {
