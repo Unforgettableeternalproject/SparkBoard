@@ -41,4 +41,3 @@ scripts/*
 tests/
 
 **/coverage/*
-services/**/index.test.js
