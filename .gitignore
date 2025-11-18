@@ -40,7 +40,5 @@ scripts/*
 
 tests/
 
-*.tests.js
-
 **/coverage/*
 services/**/index.test.js
