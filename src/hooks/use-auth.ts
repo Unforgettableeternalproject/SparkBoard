@@ -98,6 +98,16 @@ export function useAuth() {
             .then(response => response.ok ? response.json() : null)
             .then(data => {
               if (data?.user) {
+                // Apply user's theme preference
+                if (data.user.theme && data.user.theme !== 'system') {
+                  if (data.user.theme === 'dark') {
+                    document.documentElement.classList.add('dark')
+                  } else {
+                    document.documentElement.classList.remove('dark')
+                  }
+                  localStorage.setItem('theme', data.user.theme)
+                }
+                
                 setUser(prevUser => {
                   if (!prevUser) return null
                   return {
@@ -106,6 +116,7 @@ export function useAuth() {
                     email: data.user.email || prevUser.email,
                     avatarUrl: data.user.avatarUrl,
                     bio: data.user.bio,
+                    theme: data.user.theme,
                   }
                 })
               }
@@ -152,6 +163,16 @@ export function useAuth() {
             if (response.ok) {
               const data = await response.json()
               if (data.user) {
+                // Apply user's theme preference
+                if (data.user.theme && data.user.theme !== 'system') {
+                  if (data.user.theme === 'dark') {
+                    document.documentElement.classList.add('dark')
+                  } else {
+                    document.documentElement.classList.remove('dark')
+                  }
+                  localStorage.setItem('theme', data.user.theme)
+                }
+                
                 setUser(prevUser => {
                   if (!prevUser) return null
                   return {
@@ -160,6 +181,7 @@ export function useAuth() {
                     email: data.user.email || prevUser.email,
                     avatarUrl: data.user.avatarUrl,
                     bio: data.user.bio,
+                    theme: data.user.theme,
                   }
                 })
               }

@@ -37,6 +37,7 @@ function App() {
     isLoading, 
     requiresPasswordChange,
     avatarVersion,
+    idToken,
     login, 
     logout,
     register,
@@ -152,6 +153,7 @@ function App() {
         logout={logout} 
         items={items || []} 
         avatarVersion={avatarVersion}
+        idToken={idToken}
         createItem={createItem}
         deleteItem={deleteItem}
         updateItem={updateItem}
@@ -161,7 +163,7 @@ function App() {
 }
 
 // Separate component to use navigate hook
-function AppContent({ user, logout, items, avatarVersion, createItem, deleteItem, updateItem }: any) {
+function AppContent({ user, logout, items, avatarVersion, idToken, createItem, deleteItem, updateItem }: any) {
   const navigate = useNavigate()
   const location = useLocation()
   
@@ -175,7 +177,7 @@ function AppContent({ user, logout, items, avatarVersion, createItem, deleteItem
   
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <Header user={user} onLogout={handleLogout} items={items} avatarVersion={avatarVersion} />
+      <Header user={user} onLogout={handleLogout} items={items} avatarVersion={avatarVersion} idToken={idToken} />
       <PinnedAnnouncementBanner announcements={items} />
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar - Hidden on mobile, visible on desktop */}

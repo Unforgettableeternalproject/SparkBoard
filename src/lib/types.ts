@@ -7,6 +7,7 @@ export interface User {
   role?: 'Admin' | 'Moderators' | 'Users'
   avatarUrl?: string
   bio?: string
+  theme?: 'light' | 'dark' | 'system'
 }
 
 export interface UserProfile {

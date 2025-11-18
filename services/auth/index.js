@@ -121,6 +121,7 @@ async function handleGetProfile(event) {
       email: profile?.email || user.email,
       bio: profile?.bio,
       avatarUrl: profile?.avatarUrl,
+      theme: profile?.theme || 'system',
       createdAt: profile?.createdAt,
       updatedAt: profile?.updatedAt,
     },
@@ -184,6 +185,23 @@ async function handleUpdateProfile(event) {
       });
     }
     updates.avatarUrl = body.avatarUrl;
+  }
+
+  if (body.theme !== undefined) {
+    if (typeof body.theme !== 'string') {
+      return createResponse(400, {
+        error: 'ValidationError',
+        message: 'theme must be a string',
+      });
+    }
+    // Validate theme value
+    if (!['light', 'dark', 'system'].includes(body.theme)) {
+      return createResponse(400, {
+        error: 'ValidationError',
+        message: 'theme must be one of: light, dark, system',
+      });
+    }
+    updates.theme = body.theme;
   }
 
   if (body.name !== undefined) {
@@ -277,6 +295,7 @@ async function handleUpdateProfile(event) {
         email: profile.email || user.email,
         bio: profile.bio,
         avatarUrl: profile.avatarUrl,
+        theme: profile.theme || 'system',
         updatedAt: profile.updatedAt,
       },
       message: 'Profile updated successfully',

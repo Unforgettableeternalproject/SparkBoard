@@ -17,9 +17,10 @@ interface HeaderProps {
   onLogout: () => void
   items?: SparkItem[]
   avatarVersion?: number
+  idToken?: string | null
 }
 
-export function Header({ user, onLogout, items = [], avatarVersion = 0 }: HeaderProps) {
+export function Header({ user, onLogout, items = [], avatarVersion = 0, idToken }: HeaderProps) {
   const [isDark, setIsDark] = useState(() => {
     // Initialize from current DOM state
     return document.documentElement.classList.contains('dark')
@@ -33,16 +34,34 @@ export function Header({ user, onLogout, items = [], avatarVersion = 0 }: Header
     }
   }, [])
   
-  const toggleTheme = () => {
+  const toggleTheme = async () => {
     const newIsDark = !isDark
     setIsDark(newIsDark)
     
+    const newTheme = newIsDark ? 'dark' : 'light'
+    
     if (newIsDark) {
       document.documentElement.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
     } else {
       document.documentElement.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
+    }
+    localStorage.setItem('theme', newTheme)
+    
+    // Update theme preference in backend
+    if (idToken) {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL
+        await fetch(`${apiUrl}/auth/me`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': idToken,
+          },
+          body: JSON.stringify({ theme: newTheme }),
+        })
+      } catch (error) {
+        console.error('Failed to update theme preference:', error)
+      }
     }
   }
   

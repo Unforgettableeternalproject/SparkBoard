@@ -292,23 +292,46 @@ export function CreateItemDialog({
 
     let success = false
     if (type === 'task') {
+      // Convert datetime-local to ISO UTC format
+      let deadlineISO: string | undefined = undefined
+      if (deadline) {
+        // datetime-local format: YYYY-MM-DDTHH:mm (local time)
+        // Convert to UTC ISO string
+        const localDate = new Date(deadline)
+        deadlineISO = localDate.toISOString()
+      }
+      
       success = await onCreateItem({
         type: 'task',
         title: title.trim(),
         content: content.trim(),
-        deadline: deadline || undefined,
+        deadline: deadlineISO,
         subtasks: subtasks.length > 0 ? subtasks : undefined,
         attachments: uploadedAttachments
       })
     } else {
+      // Convert datetime-local to ISO UTC format
+      let expiresAtISO: string | undefined = undefined
+      let pinnedUntilISO: string | undefined = undefined
+      
+      if (expiresAt) {
+        const localDate = new Date(expiresAt)
+        expiresAtISO = localDate.toISOString()
+      }
+      
+      if (pinnedUntil) {
+        const localDate = new Date(pinnedUntil)
+        pinnedUntilISO = localDate.toISOString()
+      }
+      
       const announcementData = {
         type: 'announcement' as const,
         title: title.trim(),
         content: content.trim(),
         priority,
-        expiresAt: expiresAt || undefined,
+        expiresAt: expiresAtISO,
         isPinned,
-        pinnedUntil: pinnedUntil || undefined,
+        pinnedUntil: pinnedUntilISO,
         attachments: uploadedAttachments
       }
       console.log('CreateItemDialog - Creating announcement with data:', announcementData)
