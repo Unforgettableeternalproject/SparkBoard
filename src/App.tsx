@@ -43,6 +43,7 @@ function App() {
     register,
     verifyEmail,
     resendVerificationCode,
+    forgotPassword,
     loginWithHostedUI, 
     handleOAuthCallback,
     completeNewPasswordChallenge,
@@ -139,6 +140,7 @@ function App() {
             onLogin={login} 
             onHostedUILogin={loginWithHostedUI}
             onShowRegister={() => setShowRegister(true)}
+            onForgotPassword={forgotPassword}
           />
         )}
         <Toaster />

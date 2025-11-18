@@ -61,25 +61,20 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   // For tasks:
   // - If never been in progress: show delete button (owner/mod/admin)
   // - If has been in progress: show archive button (owner/mod/admin)
-  // - Admin always sees delete button
+  // - Admin always sees BOTH delete and archive buttons
   // For announcements: moderators or admin can delete
   const canDelete = item.type === 'announcement' 
     ? (isAdmin || isModerator)
     : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
   
-  // Can archive if task is completed or has been in progress (has subtasks history)
-  // Owner/moderator can archive tasks that have been in progress with normal statuses
-  // Admin non-owners can only force archive (not normal archive)
-  // Archive status will be calculated based on completion state:
-  // - 'completed': all subtasks done
-  // - 'partial': some subtasks done
-  // - 'aborted': no subtasks done
-  // - 'forced': admin forced archive
-  const canArchive = item.type === 'task' && onUpdate && (item.status === 'completed' || item.hasBeenInProgress) && (isOwner || isModerator)
+  // Can archive if task is completed or has been in progress
+  // Owner can archive their own tasks normally
+  // Moderators/Admin archiving others' tasks = forced archive
+  const canArchive = item.type === 'task' && onUpdate && (item.status === 'completed' || item.hasBeenInProgress) && (isOwner || isModerator || isAdmin)
   
-  // Admin can force archive any task (even without subtasks)
-  // Non-owner admin can only force archive
-  const canForceArchive = item.type === 'task' && onUpdate && isAdmin
+  // Determine if this will be a forced archive
+  // Forced archive when: non-owner moderator or admin archives the task
+  const willBeForced = !isOwner && (isModerator || isAdmin)
   
   // Check if current user can edit this item
   // Tasks: owner, moderators, or admin can edit
@@ -112,22 +107,24 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
     return 'partial'
   }
   
-  const handleArchiveClick = (forced: boolean = false) => {
+  const handleArchiveClick = () => {
+    // If not owner, it's automatically a forced archive
+    const forced = willBeForced
     const status = calculateArchiveStatus(forced)
     setArchivePreview(status)
     setArchiveDialogOpen(true)
   }
   
-  const handleArchive = async (forced: boolean = false) => {
+  const handleArchive = async () => {
     if (!onUpdate || item.type !== 'task') return
     
     setIsUpdating(true)
     try {
       await onUpdate(item.sk, {
         archivedAt: new Date().toISOString(),
-        forcedArchive: forced
+        archiveStatus: willBeForced ? 'forced' : calculateArchiveStatus(false)
       })
-      toast.success('Task archived successfully')
+      toast.success(willBeForced ? 'Task force archived successfully' : 'Task archived successfully')
       setArchiveDialogOpen(false)
     } catch (error) {
       console.error('Failed to archive task:', error)
@@ -250,7 +247,7 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                   size="icon"
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleArchiveClick(false)
+                    handleArchiveClick()
                   }}
                   disabled={isUpdating}
                   className="h-7 w-7 text-muted-foreground hover:text-warning smooth-transition hover:scale-110"
@@ -683,21 +680,12 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
               >
                 Cancel
               </Button>
-              {canForceArchive && (
-                <Button
-                  variant="secondary"
-                  onClick={() => handleArchive(true)}
-                  disabled={isUpdating}
-                >
-                  Force Archive
-                </Button>
-              )}
               <Button
                 variant="default"
-                onClick={() => handleArchive(false)}
+                onClick={handleArchive}
                 disabled={isUpdating}
               >
-                {isUpdating ? 'Archiving...' : 'Archive'}
+                {isUpdating ? 'Archiving...' : willBeForced ? 'Force Archive' : 'Archive'}
               </Button>
             </DialogFooter>
           </DialogContent>

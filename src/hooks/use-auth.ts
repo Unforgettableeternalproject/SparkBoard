@@ -614,6 +614,48 @@ export function useAuth() {
     })
   }
 
+  // Forgot password - send reset code
+  const forgotPassword = (email: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const cognitoUser = new CognitoUser({
+        Username: email,
+        Pool: userPool,
+      })
+
+      cognitoUser.forgotPassword({
+        onSuccess: (result) => {
+          console.log('Password reset code sent:', result)
+          resolve()
+        },
+        onFailure: (err) => {
+          console.error('Forgot password failed:', err)
+          reject(err)
+        },
+      })
+    })
+  }
+
+  // Confirm password reset with code
+  const confirmPassword = (email: string, code: string, newPassword: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const cognitoUser = new CognitoUser({
+        Username: email,
+        Pool: userPool,
+      })
+
+      cognitoUser.confirmPassword(code, newPassword, {
+        onSuccess: () => {
+          console.log('Password reset successful')
+          resolve()
+        },
+        onFailure: (err) => {
+          console.error('Confirm password failed:', err)
+          reject(err)
+        },
+      })
+    })
+  }
+
   return {
     user,
     isAuthenticated: !!user,
@@ -626,6 +668,8 @@ export function useAuth() {
     register,
     verifyEmail,
     resendVerificationCode,
+    forgotPassword,
+    confirmPassword,
     loginWithHostedUI,
     handleOAuthCallback,
     refreshUser,

@@ -4,19 +4,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
-import { Eye, EyeSlash } from '@phosphor-icons/react'
+import { Eye, EyeSlash, LockKey } from '@phosphor-icons/react'
 
 interface LoginFormProps {
   onLogin: (email: string, password: string) => Promise<boolean>
   onHostedUILogin?: () => void
   onShowRegister?: () => void
+  onForgotPassword?: (email: string) => Promise<void>
 }
 
-export function LoginForm({ onLogin, onHostedUILogin, onShowRegister }: LoginFormProps) {
+export function LoginForm({ onLogin, onHostedUILogin, onShowRegister, onForgotPassword }: LoginFormProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [isResetting, setIsResetting] = useState(false)
 
   // Apply theme immediately on mount to prevent flash
   useEffect(() => {
@@ -51,6 +55,78 @@ export function LoginForm({ onLogin, onHostedUILogin, onShowRegister }: LoginFor
     }
   }
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!onForgotPassword) return
+    
+    setIsResetting(true)
+    try {
+      await onForgotPassword(resetEmail)
+      toast.success('Password reset code sent to your email')
+      setShowForgotPassword(false)
+      setResetEmail('')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send reset code')
+    } finally {
+      setIsResetting(false)
+    }
+  }
+
+  if (showForgotPassword) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4 animate-in fade-in duration-300">
+        <Card className="w-full max-w-md">
+          <CardHeader className="space-y-3">
+            <div className="flex items-center gap-2">
+              <LockKey size={24} weight="duotone" className="text-primary" />
+              <CardTitle className="text-2xl font-semibold tracking-tight">Reset Password</CardTitle>
+            </div>
+            <CardDescription className="text-sm">
+              Enter your email to receive a password reset code
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email Address</Label>
+                <Input
+                  id="reset-email"
+                  type="email"
+                  placeholder="user@example.com"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              
+              <Button type="submit" className="w-full" disabled={isResetting}>
+                {isResetting ? 'Sending...' : 'Send Reset Code'}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setShowForgotPassword(false)
+                  setResetEmail('')
+                }}
+                disabled={isResetting}
+              >
+                Back to Login
+              </Button>
+              
+              <p className="text-xs text-muted-foreground text-center mt-4">
+                You will receive a verification code via email to reset your password
+              </p>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4 animate-in fade-in duration-300">
       <Card className="w-full max-w-md">
@@ -76,7 +152,19 @@ export function LoginForm({ onLogin, onHostedUILogin, onShowRegister }: LoginFor
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                {onForgotPassword && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setShowForgotPassword(true)}
+                  >
+                    Forgot password?
+                  </Button>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   id="password"
