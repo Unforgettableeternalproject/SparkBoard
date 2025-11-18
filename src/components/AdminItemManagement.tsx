@@ -59,11 +59,12 @@ export function AdminItemManagement() {
   const items = itemsResponse?.items || []
 
   // Delete item mutation
+  // Admin can delete any item including archived tasks
   const deleteMutation = useMutation({
     mutationFn: async (item: SparkItem) => {
       // Extract just the ID part if SK is in format ITEM#id
       const skValue = item.sk.startsWith('ITEM#') ? item.sk.substring(5) : item.sk
-      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
+      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}?forceDelete=true`, {
         method: 'DELETE',
         headers: {
           Authorization: idToken || '',

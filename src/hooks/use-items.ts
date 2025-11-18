@@ -109,6 +109,13 @@ export function useItems(user: User | null) {
       }
 
       console.log('use-items createItem - Sending to API:', input)
+      
+      // Convert datetime-local to ISO UTC string for deadline and date fields
+      const convertToUTC = (dateTimeLocal?: string) => {
+        if (!dateTimeLocal) return undefined
+        return new Date(dateTimeLocal).toISOString()
+      }
+      
       const response = await fetch(`${API_URL}/items`, {
         method: 'POST',
         headers: {
@@ -122,12 +129,12 @@ export function useItems(user: User | null) {
           attachments: input.attachments,
           // Task-specific fields
           subtasks: input.type === 'task' ? input.subtasks : undefined,
-          deadline: input.type === 'task' ? input.deadline : undefined,
+          deadline: input.type === 'task' ? convertToUTC(input.deadline) : undefined,
           // Announcement-specific fields
           priority: input.type === 'announcement' ? input.priority : undefined,
-          expiresAt: input.type === 'announcement' ? input.expiresAt : undefined,
+          expiresAt: input.type === 'announcement' ? convertToUTC(input.expiresAt) : undefined,
           isPinned: input.type === 'announcement' ? input.isPinned : undefined,
-          pinnedUntil: input.type === 'announcement' ? input.pinnedUntil : undefined,
+          pinnedUntil: input.type === 'announcement' ? convertToUTC(input.pinnedUntil) : undefined,
         }),
       })
 
@@ -177,7 +184,7 @@ export function useItems(user: User | null) {
     }
   }
   
-  const deleteItem = async (itemSk: string) => {
+  const deleteItem = async (itemSk: string, forceDelete: boolean = false) => {
     try {
       const idToken = localStorage.getItem('cognito_id_token')
       if (!idToken) {
@@ -188,7 +195,12 @@ export function useItems(user: User | null) {
       // Extract just the ID part if SK is in format ITEM#id
       const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
 
-      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
+      // Add forceDelete query parameter if true
+      const url = forceDelete 
+        ? `${API_URL}/items/${encodeURIComponent(skValue)}?forceDelete=true`
+        : `${API_URL}/items/${encodeURIComponent(skValue)}`
+
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': idToken,
@@ -215,6 +227,24 @@ export function useItems(user: User | null) {
         return
       }
 
+      // Convert datetime-local to ISO UTC string for date fields
+      const convertToUTC = (dateTimeLocal?: string) => {
+        if (!dateTimeLocal) return undefined
+        return new Date(dateTimeLocal).toISOString()
+      }
+      
+      // Convert date fields if they exist in updates
+      const processedUpdates = { ...updates }
+      if ('deadline' in processedUpdates && processedUpdates.deadline) {
+        processedUpdates.deadline = convertToUTC(processedUpdates.deadline)
+      }
+      if ('expiresAt' in processedUpdates && processedUpdates.expiresAt) {
+        processedUpdates.expiresAt = convertToUTC(processedUpdates.expiresAt)
+      }
+      if ('pinnedUntil' in processedUpdates && processedUpdates.pinnedUntil) {
+        processedUpdates.pinnedUntil = convertToUTC(processedUpdates.pinnedUntil)
+      }
+
       // Extract just the ID part if SK is in format ITEM#id
       const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
 
@@ -224,7 +254,7 @@ export function useItems(user: User | null) {
           'Content-Type': 'application/json',
           'Authorization': idToken,
         },
-        body: JSON.stringify(updates),
+        body: JSON.stringify(processedUpdates),
       })
 
       if (!response.ok) {

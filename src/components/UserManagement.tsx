@@ -218,6 +218,12 @@ export function UserManagement() {
   const filteredUsers = users.filter((user) => {
     const email = user.Attributes.find((attr) => attr.Name === 'email')?.Value || ''
     const name = user.Attributes.find((attr) => attr.Name === 'name')?.Value || ''
+    const userGroups = user.Groups || []
+    
+    // Filter out Admin users - admins cannot manage other admins
+    const isAdminUser = userGroups.includes('Admin')
+    if (isAdminUser) return false
+    
     const matchesSearch =
       email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -359,12 +365,6 @@ export function UserManagement() {
                               <SelectValue placeholder="Set role..." />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="Admin">
-                                <div className="flex items-center gap-2">
-                                  <ShieldCheck size={12} />
-                                  Admin
-                                </div>
-                              </SelectItem>
                               <SelectItem value="Moderators">
                                 <div className="flex items-center gap-2">
                                   <ShieldCheck size={12} />

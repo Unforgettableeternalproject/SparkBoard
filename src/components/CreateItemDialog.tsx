@@ -11,6 +11,9 @@ import { Plus, File, X, CalendarBlank, ListChecks, PushPin } from '@phosphor-ico
 import { CreateItemInput, FileAttachment, SubTask } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatFileSize } from '@/lib/helpers'
+
+const API_URL = import.meta.env.VITE_API_URL
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -151,7 +154,8 @@ export function CreateItemDialog({
             name: file.name,
             size: file.size,
             type: file.type,
-            dataUrl: reader.result as string
+            dataUrl: reader.result as string,
+            file: file // Keep original file for upload
           }
         ])
       }
@@ -184,6 +188,73 @@ export function CreateItemDialog({
     setSubtasks((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const uploadFilesToS3 = async (files: FileAttachment[]): Promise<FileAttachment[]> => {
+    const idToken = localStorage.getItem('cognito_id_token')
+    if (!idToken) {
+      throw new Error('Authentication required')
+    }
+
+    const uploadedFiles: FileAttachment[] = []
+
+    for (const fileAttachment of files) {
+      if (!fileAttachment.file) {
+        // If no file object (e.g., existing attachment), keep as is
+        uploadedFiles.push(fileAttachment)
+        continue
+      }
+
+      try {
+        // Step 1: Get presigned URL
+        const presignResponse = await fetch(`${API_URL}/uploads/presign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': idToken,
+          },
+          body: JSON.stringify({
+            fileName: fileAttachment.name,
+            contentType: fileAttachment.type,
+            fileSize: fileAttachment.size,
+          }),
+        })
+
+        if (!presignResponse.ok) {
+          throw new Error(`Failed to get upload URL: ${presignResponse.statusText}`)
+        }
+
+        const presignData = await presignResponse.json()
+        const { upload } = presignData
+
+        // Step 2: Upload file to S3
+        const uploadResponse = await fetch(upload.url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': fileAttachment.type,
+          },
+          body: fileAttachment.file,
+        })
+
+        if (!uploadResponse.ok) {
+          throw new Error(`Failed to upload file: ${uploadResponse.statusText}`)
+        }
+
+        // Step 3: Store metadata with S3 key
+        uploadedFiles.push({
+          name: fileAttachment.name,
+          size: fileAttachment.size,
+          type: fileAttachment.type,
+          key: upload.key,
+          url: `https://${upload.bucket}.s3.ap-northeast-1.amazonaws.com/${upload.key}`,
+        })
+      } catch (error) {
+        console.error(`Error uploading ${fileAttachment.name}:`, error)
+        throw error
+      }
+    }
+
+    return uploadedFiles
+  }
+
   const handleSubmit = async () => {
     if (!title.trim()) {
       toast.error('Title is required')
@@ -203,6 +274,22 @@ export function CreateItemDialog({
       }
     }
 
+    // Upload files to S3 first if there are attachments
+    let uploadedAttachments: FileAttachment[] | undefined = undefined
+    if (attachments.length > 0) {
+      try {
+        toast.loading('Uploading files...')
+        uploadedAttachments = await uploadFilesToS3(attachments)
+        toast.dismiss()
+        toast.success('Files uploaded successfully')
+      } catch (error) {
+        toast.dismiss()
+        toast.error('Failed to upload files')
+        console.error('File upload error:', error)
+        return
+      }
+    }
+
     let success = false
     if (type === 'task') {
       success = await onCreateItem({
@@ -211,7 +298,7 @@ export function CreateItemDialog({
         content: content.trim(),
         deadline: deadline || undefined,
         subtasks: subtasks.length > 0 ? subtasks : undefined,
-        attachments: attachments.length > 0 ? attachments : undefined
+        attachments: uploadedAttachments
       })
     } else {
       const announcementData = {
@@ -222,7 +309,7 @@ export function CreateItemDialog({
         expiresAt: expiresAt || undefined,
         isPinned,
         pinnedUntil: pinnedUntil || undefined,
-        attachments: attachments.length > 0 ? attachments : undefined
+        attachments: uploadedAttachments
       }
       console.log('CreateItemDialog - Creating announcement with data:', announcementData)
       success = await onCreateItem(announcementData)

@@ -41,6 +41,9 @@ exports.handler = async (event) => {
   let errorCount = 0;
   
   try {
+    console.log('Current time:', now);
+    console.log('Table name:', TABLE_NAME);
+    
     // Scan for tasks that need auto-archiving
     // Note: In production, you'd want to use a GSI for this query
     const scanCommand = new ScanCommand({
@@ -52,8 +55,10 @@ exports.handler = async (event) => {
       },
     });
     
+    console.log('Scan command:', JSON.stringify(scanCommand, null, 2));
     const result = await docClient.send(scanCommand);
     console.log(`Found ${result.Items?.length || 0} tasks to auto-archive`);
+    console.log('Scan result items:', JSON.stringify(result.Items, null, 2));
     
     if (!result.Items || result.Items.length === 0) {
       return {
@@ -73,8 +78,8 @@ exports.handler = async (event) => {
         const updateCommand = new UpdateCommand({
           TableName: TABLE_NAME,
           Key: {
-            pk: item.pk,
-            sk: item.sk,
+            PK: item.PK,
+            SK: item.SK,
           },
           UpdateExpression: 'SET archivedAt = :archivedAt, archiveStatus = :archiveStatus, updatedAt = :updatedAt REMOVE autoArchiveAt',
           ExpressionAttributeValues: {

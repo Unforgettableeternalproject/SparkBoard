@@ -68,15 +68,17 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
     : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
   
   // Can archive if task has been in progress (has subtasks history)
-  // Owner/moderator/admin can archive tasks that have been in progress
+  // Owner/moderator can archive tasks that have been in progress with normal statuses
+  // Admin non-owners can only force archive (not normal archive)
   // Archive status will be calculated based on completion state:
   // - 'completed': all subtasks done
   // - 'partial': some subtasks done
   // - 'aborted': no subtasks done
   // - 'forced': admin forced archive
-  const canArchive = item.type === 'task' && onUpdate && item.hasBeenInProgress && (isOwner || isAdmin || isModerator)
+  const canArchive = item.type === 'task' && onUpdate && item.hasBeenInProgress && (isOwner || isModerator)
   
   // Admin can force archive any task (even without subtasks)
+  // Non-owner admin can only force archive
   const canForceArchive = item.type === 'task' && onUpdate && isAdmin
   
   // Check if current user can edit this item
