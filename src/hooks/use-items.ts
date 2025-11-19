@@ -4,13 +4,19 @@ import { User } from '@/lib/types'
 import { toast } from 'sonner'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-const POLLING_INTERVAL = 120000 // 2 minutes (120 seconds)
+const POLLING_INTERVAL = 30000 // 30 seconds - decreased from 5 minutes
 
 export function useItems(user: User | null) {
   const [items, setItems] = useState<SparkItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastFetchTimeRef = useRef<number>(Date.now())
+  const itemsRef = useRef<SparkItem[]>([]) // Keep a ref to avoid dependency issues
+  
+  // Update itemsRef whenever items change
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
   
   // Fetch items from API
   const fetchItems = useCallback(async (silent = false) => {
@@ -41,12 +47,12 @@ export function useItems(user: User | null) {
       const data = await response.json()
       const newItems = data.items || []
       
-      // Check if there are changes (for polling)
-      if (silent && items.length > 0) {
+      // Check if there are changes (for polling) - use ref to avoid dependency
+      if (silent && itemsRef.current.length > 0) {
         const hasChanges = 
-          newItems.length !== items.length ||
+          newItems.length !== itemsRef.current.length ||
           JSON.stringify(newItems.map((i: SparkItem) => i.sk).sort()) !== 
-          JSON.stringify(items.map(i => i.sk).sort())
+          JSON.stringify(itemsRef.current.map(i => i.sk).sort())
         
         if (hasChanges) {
           console.log('[use-items] Changes detected, updating items')
@@ -67,7 +73,7 @@ export function useItems(user: User | null) {
     } finally {
       if (!silent) setIsLoading(false)
     }
-  }, [user, items])
+  }, [user]) // Remove items from dependencies
   
   // Initial fetch and setup polling
   useEffect(() => {
@@ -89,9 +95,12 @@ export function useItems(user: User | null) {
       fetchItems(true)
     }, POLLING_INTERVAL)
     
+    console.log(`[use-items] Polling started with ${POLLING_INTERVAL / 1000}s interval`)
+    
     // Cleanup on unmount
     return () => {
       if (pollingIntervalRef.current) {
+        console.log('[use-items] Polling stopped')
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
       }

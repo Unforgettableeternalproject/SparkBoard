@@ -36,14 +36,14 @@ export function TasksPage() {
     switch (activeFilter) {
       case 'due-today':
         return tasks.filter(task => {
-          if (!task.deadline || task.status === 'completed') return false
+          if (!task.deadline) return false
           const deadline = new Date(task.deadline)
           deadline.setHours(0, 0, 0, 0)
           return deadline.getTime() === today.getTime()
         })
       
       case 'my-tasks':
-        return tasks.filter(task => task.userId === user?.sub || task.userId === user?.id)
+        return tasks.filter(task => task.userId === user?.id)
       
       case 'overdue':
         return tasks.filter(task => {
@@ -213,7 +213,7 @@ export function TasksPage() {
       {/* View Content */}
       {viewMode === 'kanban' ? (
         <KanbanView
-          items={tasks}
+          items={filteredTasks}
           currentUser={user!}
           onDelete={handleDeleteItem}
           onUpdate={updateItem}

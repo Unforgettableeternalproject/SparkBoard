@@ -22,6 +22,12 @@ export function LoginForm({ onLogin, onHostedUILogin, onShowRegister, onForgotPa
   const [resetEmail, setResetEmail] = useState('')
   const [isResetting, setIsResetting] = useState(false)
 
+  // Pre-fill reset email when opening forgot password dialog
+  const handleOpenForgotPassword = () => {
+    setResetEmail(username)
+    setShowForgotPassword(true)
+  }
+
   // Apply theme immediately on mount to prevent flash
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme')
@@ -159,7 +165,8 @@ export function LoginForm({ onLogin, onHostedUILogin, onShowRegister, onForgotPa
                     type="button"
                     variant="link"
                     className="h-auto p-0 text-xs"
-                    onClick={() => setShowForgotPassword(true)}
+                    tabIndex={-1}
+                    onClick={handleOpenForgotPassword}
                   >
                     Forgot password?
                   </Button>
