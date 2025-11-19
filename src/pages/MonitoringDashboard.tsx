@@ -119,25 +119,30 @@ export function MonitoringDashboard() {
   };
 
   // Use React Query for automatic caching and refetching
+  // Disabled automatic refetching to reduce CloudWatch API costs
   const { data: metrics, isLoading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useQuery<Metrics>({
     queryKey: ['monitoring', 'metrics'],
     queryFn: fetchMetrics,
     enabled: isAdmin && !!idToken,
-    refetchInterval: 60000, // Auto-refresh every 60 seconds
+    refetchOnWindowFocus: false, // Don't refetch when window regains focus
+    staleTime: 5 * 60 * 1000, // Data considered fresh for 5 minutes
+    // refetchInterval removed - users must manually refresh
   });
 
   const { data: traces, isLoading: tracesLoading, error: tracesError, refetch: refetchTraces } = useQuery<Traces>({
     queryKey: ['monitoring', 'traces'],
     queryFn: fetchTraces,
     enabled: isAdmin && !!idToken,
-    refetchInterval: 60000,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: alarms, isLoading: alarmsLoading, error: alarmsError, refetch: refetchAlarms } = useQuery<Alarms>({
     queryKey: ['monitoring', 'alarms'],
     queryFn: fetchAlarms,
     enabled: isAdmin && !!idToken,
-    refetchInterval: 60000,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
   });
 
   const loading = metricsLoading || tracesLoading || alarmsLoading;

@@ -71,29 +71,60 @@ async function getUserProfile(userId, orgId) {
 async function updateUserProfile(userId, orgId, updates) {
   try {
     const now = new Date().toISOString();
-    const userProfile = {
-      PK: `ORG#${orgId}`,
-      SK: `USER#${userId}`,
-      entityType: 'USER_PROFILE',
-      userId,
-      orgId,
-      ...updates,
-      updatedAt: now,
-    };
-
-    // If this is the first time, set createdAt
+    
+    // Get existing profile first
     const existing = await getUserProfile(userId, orgId);
+    
+    // Build UpdateExpression dynamically
+    const updateExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    
+    // Always update updatedAt
+    updateExpressions.push('#updatedAt = :updatedAt');
+    expressionAttributeNames['#updatedAt'] = 'updatedAt';
+    expressionAttributeValues[':updatedAt'] = now;
+    
+    // Add each update field
+    Object.keys(updates).forEach((key, index) => {
+      const placeholder = `#field${index}`;
+      const valuePlaceholder = `:value${index}`;
+      updateExpressions.push(`${placeholder} = ${valuePlaceholder}`);
+      expressionAttributeNames[placeholder] = key;
+      expressionAttributeValues[valuePlaceholder] = updates[key];
+    });
+    
+    // If this is the first time, set createdAt and required fields
     if (!existing) {
-      userProfile.createdAt = now;
+      updateExpressions.push('#createdAt = :createdAt');
+      updateExpressions.push('#entityType = :entityType');
+      updateExpressions.push('#userId = :userId');
+      updateExpressions.push('#orgId = :orgId');
+      expressionAttributeNames['#createdAt'] = 'createdAt';
+      expressionAttributeNames['#entityType'] = 'entityType';
+      expressionAttributeNames['#userId'] = 'userId';
+      expressionAttributeNames['#orgId'] = 'orgId';
+      expressionAttributeValues[':createdAt'] = now;
+      expressionAttributeValues[':entityType'] = 'USER_PROFILE';
+      expressionAttributeValues[':userId'] = userId;
+      expressionAttributeValues[':orgId'] = orgId;
     }
-
-    const command = new PutCommand({
+    
+    const { UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+    const command = new UpdateCommand({
       TableName: TABLE_NAME,
-      Item: userProfile,
+      Key: {
+        PK: `ORG#${orgId}`,
+        SK: `USER#${userId}`,
+      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
     });
 
-    await docClient.send(command);
-    return userProfile;
+    const result = await docClient.send(command);
+    return result.Attributes;
   } catch (error) {
     console.error('Error updating user profile:', error);
     throw error;

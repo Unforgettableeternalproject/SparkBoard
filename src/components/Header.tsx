@@ -7,6 +7,7 @@ import { getAvatarColor } from '@/lib/avatar-utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Sidebar } from './Sidebar'
 import { SignOut, User as UserIcon, ChartBar, Table, ListChecks, MegaphoneSimple, Moon, Sun, List as ListIcon } from '@phosphor-icons/react'
 import { useState, useEffect } from 'react'
@@ -25,6 +26,7 @@ export function Header({ user, onLogout, items = [], avatarVersion = 0, idToken 
     // Initialize from current DOM state
     return document.documentElement.classList.contains('dark')
   })
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   
   useEffect(() => {
     // Sync with DOM state on mount (in case it was changed elsewhere)
@@ -214,7 +216,10 @@ export function Header({ user, onLogout, items = [], avatarVersion = 0, idToken 
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onLogout} className="text-destructive focus:text-destructive">
+                <DropdownMenuItem 
+                  onClick={() => setShowLogoutConfirm(true)} 
+                  className="text-destructive focus:text-destructive"
+                >
                   <SignOut className="mr-2" size={16} />
                   Log out
                 </DropdownMenuItem>
@@ -223,6 +228,30 @@ export function Header({ user, onLogout, items = [], avatarVersion = 0, idToken 
           </div>
         </div>
       </div>
+
+      {/* Logout Confirmation Dialog */}
+      <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Logout</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to log out? You will need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowLogoutConfirm(false)
+                onLogout()
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Log out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </header>
   )
 }
