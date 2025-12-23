@@ -7,13 +7,15 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as path from 'path';
 
-interface ApiStackProps extends cdk.StackProps {
+export interface ApiStackProps extends cdk.StackProps {
   table: dynamodb.Table;
   bucket: s3.Bucket;
-  userPool: cognito.UserPool;
-  userPoolClient: cognito.UserPoolClient;
+  userPool: cognito.IUserPool;
+  userPoolClient: cognito.IUserPoolClient;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -522,6 +524,41 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UploadsEndpoint', {
       value: `${this.api.url}uploads/presign`,
       description: 'Uploads Presign Endpoint (requires JWT)',
+    });
+
+    // Auto-Archive Lambda Function
+    const autoArchiveFunction = new lambda.Function(this, 'AutoArchiveFunction', {
+      functionName: 'SparkBoard-AutoArchive',
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: 'auto-archive.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../services/items')),
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 512,
+      environment: {
+        TABLE_NAME: table.tableName,
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+      tracing: lambda.Tracing.ACTIVE,
+    });
+
+    // Grant DynamoDB permissions to auto-archive function
+    table.grantReadWriteData(autoArchiveFunction);
+
+    // EventBridge Rule to trigger auto-archive every minute
+    const autoArchiveRule = new events.Rule(this, 'AutoArchiveRule', {
+      ruleName: 'SparkBoard-AutoArchive-Rule',
+      description: 'Triggers auto-archive Lambda every minute to check for tasks that need archiving',
+      schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
+      enabled: true,
+    });
+
+    // Add Lambda as target
+    autoArchiveRule.addTarget(new targets.LambdaFunction(autoArchiveFunction));
+
+    new cdk.CfnOutput(this, 'AutoArchiveFunctionName', {
+      value: autoArchiveFunction.functionName,
+      description: 'Auto-archive Lambda function name',
     });
   }
 }

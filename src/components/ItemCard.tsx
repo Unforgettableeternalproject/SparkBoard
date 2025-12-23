@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { EditItemDialog } from '@/components/EditItemDialog'
+import { MarkdownContent } from '@/components/MarkdownContent'
 import { ListChecks, Megaphone, File, DownloadSimple, Image as ImageIcon, CalendarBlank, Warning, CheckCircle, Trash, PencilSimple, X, Note, Archive } from '@phosphor-icons/react'
 import { formatDate, formatFileSize } from '@/lib/helpers'
 import { cn } from '@/lib/utils'
@@ -55,22 +56,25 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
   // Check permissions
   const isAdmin = currentUser['cognito:groups']?.includes('Admin')
   const isModerator = currentUser['cognito:groups']?.includes('Moderators')
-  const isOwner = item.userId === currentUser.sub
+  const isOwner = item.userId === currentUser.sub || item.userId === currentUser.id
   
   // For tasks:
   // - If never been in progress: show delete button (owner/mod/admin)
   // - If has been in progress: show archive button (owner/mod/admin)
-  // - Admin always sees delete button
+  // - Admin always sees BOTH delete and archive buttons
   // For announcements: moderators or admin can delete
   const canDelete = item.type === 'announcement' 
     ? (isAdmin || isModerator)
     : isAdmin || ((isOwner || isModerator) && !item.hasBeenInProgress)
   
-  // Can archive if task has been in progress (owner/moderator/admin)
-  const canArchive = item.type === 'task' && onUpdate && (isOwner || isAdmin || isModerator) && item.hasBeenInProgress
+  // Can archive if task is completed or has been in progress
+  // Owner can archive their own tasks normally
+  // Moderators/Admin archiving others' tasks = forced archive
+  const canArchive = item.type === 'task' && onUpdate && (item.status === 'completed' || item.hasBeenInProgress) && (isOwner || isModerator || isAdmin)
   
-  // Admin can force archive any task
-  const canForceArchive = item.type === 'task' && onUpdate && isAdmin
+  // Determine if this will be a forced archive
+  // Forced archive when: non-owner moderator or admin archives the task
+  const willBeForced = !isOwner && (isModerator || isAdmin)
   
   // Check if current user can edit this item
   // Tasks: owner, moderators, or admin can edit
@@ -103,22 +107,24 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
     return 'partial'
   }
   
-  const handleArchiveClick = (forced: boolean = false) => {
+  const handleArchiveClick = () => {
+    // If not owner, it's automatically a forced archive
+    const forced = willBeForced
     const status = calculateArchiveStatus(forced)
     setArchivePreview(status)
     setArchiveDialogOpen(true)
   }
   
-  const handleArchive = async (forced: boolean = false) => {
+  const handleArchive = async () => {
     if (!onUpdate || item.type !== 'task') return
     
     setIsUpdating(true)
     try {
       await onUpdate(item.sk, {
         archivedAt: new Date().toISOString(),
-        forcedArchive: forced
+        archiveStatus: willBeForced ? 'forced' : calculateArchiveStatus(false)
       })
-      toast.success('Task archived successfully')
+      toast.success(willBeForced ? 'Task force archived successfully' : 'Task archived successfully')
       setArchiveDialogOpen(false)
     } catch (error) {
       console.error('Failed to archive task:', error)
@@ -241,7 +247,7 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
                   size="icon"
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleArchiveClick(false)
+                    handleArchiveClick()
                   }}
                   disabled={isUpdating}
                   className="h-7 w-7 text-muted-foreground hover:text-warning smooth-transition hover:scale-110"
@@ -317,9 +323,9 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
           }}
         >
           {item.content && (
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words overflow-wrap-anywhere">
-              {item.content}
-            </p>
+            <div className="text-sm text-foreground leading-relaxed break-words overflow-wrap-anywhere">
+              <MarkdownContent content={item.content} />
+            </div>
           )}
           
           {/* Task-specific fields */}
@@ -574,7 +580,9 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
             </DialogHeader>
             <div className="space-y-4">
               {item.content && (
-                <p className="text-sm whitespace-pre-wrap break-words">{item.content}</p>
+                <div className="text-sm break-words">
+                  <MarkdownContent content={item.content} />
+                </div>
               )}
               {item.attachments && item.attachments.length > 0 && (
                 <div className="space-y-2">
@@ -672,21 +680,12 @@ export function ItemCard({ item, currentUser, onDelete, onUpdate }: ItemCardProp
               >
                 Cancel
               </Button>
-              {canForceArchive && (
-                <Button
-                  variant="secondary"
-                  onClick={() => handleArchive(true)}
-                  disabled={isUpdating}
-                >
-                  Force Archive
-                </Button>
-              )}
               <Button
                 variant="default"
-                onClick={() => handleArchive(false)}
+                onClick={handleArchive}
                 disabled={isUpdating}
               >
-                {isUpdating ? 'Archiving...' : 'Archive'}
+                {isUpdating ? 'Archiving...' : willBeForced ? 'Force Archive' : 'Archive'}
               </Button>
             </DialogFooter>
           </DialogContent>

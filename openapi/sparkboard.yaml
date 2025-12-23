@@ -152,6 +152,92 @@ paths:
                 type: string
 
   /items/{sk}:
+    patch:
+      summary: Update an item (task or announcement)
+      operationId: updateItem
+      parameters:
+        - name: sk
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^ITEM#[a-zA-Z0-9-]+$'
+          description: Item sort key (e.g., ITEM#uuid)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                content:
+                  type: string
+                  maxLength: 5000
+                status:
+                  type: string
+                  enum: [active, completed, in-progress]
+                  description: Task status
+                deadline:
+                  type: string
+                  format: date-time
+                  description: Task deadline (UTC ISO 8601)
+                subtasks:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubTask'
+                priority:
+                  type: string
+                  enum: [normal, high, urgent]
+                  description: Announcement priority
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: Announcement expiration (UTC ISO 8601)
+                isPinned:
+                  type: boolean
+                  description: Pin announcement to top
+                pinnedUntil:
+                  type: string
+                  format: date-time
+                  description: Auto-unpin date (UTC ISO 8601)
+                archivedAt:
+                  type: string
+                  format: date-time
+                  description: Archive timestamp (UTC ISO 8601)
+                forcedArchive:
+                  type: boolean
+                  description: Admin forced archive
+      responses:
+        '200':
+          description: Item updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - item
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  item:
+                    $ref: '#/components/schemas/Item'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
     delete:
       summary: Delete an item
       operationId: deleteItem
@@ -163,6 +249,12 @@ paths:
             type: string
             pattern: '^ITEM#[a-zA-Z0-9-]+$'
           description: Item sort key (e.g., ITEM#uuid)
+        - name: forceDelete
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Admin force delete (bypass restrictions)
       responses:
         '200':
           description: Item deleted successfully
@@ -205,9 +297,506 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                type: object
+                required:
+                  - success
+                  - user
+                  - timestamp
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/UserProfile'
+                  timestamp:
+                    type: string
+                    format: date-time
         '401':
           $ref: '#/components/responses/Unauthorized'
+    
+    patch:
+      summary: Update user profile
+      operationId: updateUserProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  example: John Doe
+                email:
+                  type: string
+                  format: email
+                  example: john@example.com
+                bio:
+                  type: string
+                  maxLength: 500
+                  example: Full-stack developer
+                avatarUrl:
+                  type: string
+                  format: uri
+                  example: https://s3.amazonaws.com/avatar.jpg
+                theme:
+                  type: string
+                  enum: [light, dark, system]
+                  example: dark
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - user
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/UserProfile'
+                  message:
+                    type: string
+                    example: Profile updated successfully
+                  warning:
+                    type: string
+                    nullable: true
+                    example: Email verification required. Please check your inbox.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /uploads/presign:
+    post:
+      summary: Generate presigned URL for S3 upload
+      operationId: generatePresignedUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileName
+                - contentType
+                - fileSize
+              properties:
+                fileName:
+                  type: string
+                  example: document.pdf
+                contentType:
+                  type: string
+                  example: application/pdf
+                fileSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 10485760
+                  example: 1024000
+                  description: File size in bytes (max 10MB)
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - upload
+                properties:
+                  upload:
+                    type: object
+                    required:
+                      - url
+                      - key
+                      - bucket
+                      - expiresIn
+                    properties:
+                      url:
+                        type: string
+                        format: uri
+                        example: https://sparkboard-files.s3.amazonaws.com/...?X-Amz-Algorithm=...
+                      key:
+                        type: string
+                        example: userId/2025-11-18/uuid-document.pdf
+                      bucket:
+                        type: string
+                        example: sparkboard-files-434824683139-ap-northeast-1
+                      expiresIn:
+                        type: integer
+                        example: 300
+                        description: URL validity in seconds
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users:
+    get:
+      summary: List all users (Admin only)
+      operationId: listUsers
+      responses:
+        '200':
+          description: Successfully retrieved users
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - users
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CognitoUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users/add-to-group:
+    post:
+      summary: Add user to group (Admin only)
+      operationId: addUserToGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - groupName
+              properties:
+                username:
+                  type: string
+                  example: johndoe
+                groupName:
+                  type: string
+                  enum: [Admin, Moderators, Users]
+                  example: Moderators
+      responses:
+        '200':
+          description: User added to group successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User johndoe added to group Moderators
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users/{username}/groups/{groupName}:
+    delete:
+      summary: Remove user from group (Admin only)
+      operationId: removeUserFromGroup
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          example: johndoe
+        - name: groupName
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [Admin, Moderators, Users]
+          example: Moderators
+      responses:
+        '200':
+          description: User removed from group successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User johndoe removed from group Moderators
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users/{username}/disable:
+    post:
+      summary: Disable user account (Admin only)
+      operationId: disableUser
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          example: johndoe
+      responses:
+        '200':
+          description: User disabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User johndoe disabled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users/{username}/enable:
+    post:
+      summary: Enable user account (Admin only)
+      operationId: enableUser
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          example: johndoe
+      responses:
+        '200':
+          description: User enabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User johndoe enabled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /users/{username}:
+    delete:
+      summary: Delete user account (Admin only)
+      operationId: deleteUser
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+          example: johndoe
+      responses:
+        '200':
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User johndoe deleted successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /monitoring/metrics:
+    get:
+      summary: Get CloudWatch metrics (Admin only)
+      operationId: getMetrics
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: integer
+            default: 300
+          description: Metric period in seconds
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+          description: Hours of data to retrieve
+      responses:
+        '200':
+          description: Successfully retrieved metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - lambda
+                  - dynamodb
+                  - apigateway
+                properties:
+                  lambda:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        duration:
+                          type: object
+                        errors:
+                          type: object
+                        throttles:
+                          type: object
+                  dynamodb:
+                    type: object
+                    properties:
+                      readCapacity:
+                        type: object
+                      writeCapacity:
+                        type: object
+                  apigateway:
+                    type: object
+                    properties:
+                      count:
+                        type: object
+                      latency:
+                        type: object
+                      errors:
+                        type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /monitoring/traces:
+    get:
+      summary: Get X-Ray traces (Admin only)
+      operationId: getTraces
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+          description: Number of traces to retrieve
+      responses:
+        '200':
+          description: Successfully retrieved traces
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - traces
+                properties:
+                  traces:
+                    type: array
+                    items:
+                      type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /monitoring/alarms:
+    get:
+      summary: Get CloudWatch alarms (Admin only)
+      operationId: getAlarms
+      responses:
+        '200':
+          description: Successfully retrieved alarms
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - alarms
+                properties:
+                  alarms:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - AlarmName
+                        - StateValue
+                      properties:
+                        AlarmName:
+                          type: string
+                        StateValue:
+                          type: string
+                          enum: [OK, ALARM, INSUFFICIENT_DATA]
+                        StateReason:
+                          type: string
+                        AlarmDescription:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
 components:
   securitySchemes:
@@ -218,12 +807,15 @@ components:
       description: Cognito JWT token from Authorization header
 
   schemas:
-    User:
+    UserProfile:
       type: object
       required:
         - userId
         - username
         - email
+        - name
+        - orgId
+        - groups
       properties:
         userId:
           type: string
@@ -235,13 +827,81 @@ components:
           type: string
           format: email
           example: john@example.com
+        name:
+          type: string
+          example: John Doe
         orgId:
           type: string
-          example: org-123
+          example: sparkboard-demo
+        groups:
+          type: array
+          items:
+            type: string
+            enum: [Admin, Moderators, Users]
+          example: [Users]
         role:
           type: string
           enum: [Admin, Moderators, Users]
           example: Users
+        bio:
+          type: string
+          nullable: true
+          example: Full-stack developer
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: https://s3.amazonaws.com/avatar.jpg
+        theme:
+          type: string
+          enum: [light, dark, system]
+          nullable: true
+          example: dark
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+    
+    CognitoUser:
+      type: object
+      required:
+        - userId
+        - username
+        - email
+        - enabled
+        - status
+        - groups
+        - createdAt
+      properties:
+        userId:
+          type: string
+          example: 123e4567-e89b-12d3-a456-426614174000
+        username:
+          type: string
+          example: johndoe
+        email:
+          type: string
+          format: email
+          example: john@example.com
+        enabled:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [CONFIRMED, UNCONFIRMED, ARCHIVED, COMPROMISED, UNKNOWN, RESET_REQUIRED, FORCE_CHANGE_PASSWORD]
+          example: CONFIRMED
+        groups:
+          type: array
+          items:
+            type: string
+          example: [Users]
+        createdAt:
+          type: string
+          format: date-time
 
     Item:
       type: object
@@ -298,7 +958,7 @@ components:
           example: task
         status:
           type: string
-          enum: [active, completed]
+          enum: [active, completed, in-progress]
           nullable: true
           description: Only for tasks
         attachments:
@@ -339,6 +999,41 @@ components:
           format: date-time
           nullable: true
           example: '2025-12-31T23:59:59Z'
+        isPinned:
+          type: boolean
+          nullable: true
+          description: Whether announcement is pinned
+        pinnedUntil:
+          type: string
+          format: date-time
+          nullable: true
+          description: Auto-unpin after this date
+        # Archive fields
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When task was archived (UTC)
+        archiveStatus:
+          type: string
+          enum: [completed, partial, aborted, forced]
+          nullable: true
+          description: Archive completion status
+        autoArchiveAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Scheduled auto-archive time (UTC)
+        hasBeenInProgress:
+          type: boolean
+          nullable: true
+          description: Whether task has had subtasks
+        # Admin annotations
+        annotations:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Annotation'
 
     SubTask:
       type: object
@@ -366,6 +1061,40 @@ components:
           type: string
           nullable: true
           example: user-123
+    
+    Annotation:
+      type: object
+      required:
+        - id
+        - itemSk
+        - adminId
+        - adminName
+        - content
+        - createdAt
+      properties:
+        id:
+          type: string
+          example: ANN#1731931200000
+        itemSk:
+          type: string
+          example: ITEM#123e4567-e89b-12d3-a456-426614174000
+        adminId:
+          type: string
+          example: admin-user-id
+        adminName:
+          type: string
+          example: Admin User
+        content:
+          type: string
+          maxLength: 1000
+          example: This task requires priority attention
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     Attachment:
       type: object
@@ -380,9 +1109,9 @@ components:
         size:
           type: integer
           minimum: 1
-          maximum: 5242880
+          maximum: 10485760
           example: 102400
-          description: File size in bytes (max 5MB)
+          description: File size in bytes (max 10MB)
         type:
           type: string
           example: application/pdf
@@ -391,6 +1120,11 @@ components:
           format: uri
           nullable: true
           example: https://sparkboard-files.s3.amazonaws.com/document.pdf
+        key:
+          type: string
+          nullable: true
+          example: userId/2025-11-18/uuid-document.pdf
+          description: S3 object key
 
     CreateTaskInput:
       type: object
@@ -435,6 +1169,7 @@ components:
           type: string
           format: date-time
           example: '2025-12-31T23:59:59Z'
+          description: Task deadline in UTC ISO 8601 format
 
     CreateAnnouncementInput:
       type: object
@@ -469,6 +1204,17 @@ components:
           type: string
           format: date-time
           example: '2025-12-31T23:59:59Z'
+          description: Announcement expiration in UTC ISO 8601 format
+        isPinned:
+          type: boolean
+          default: false
+          description: Pin announcement to top
+        pinnedUntil:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2025-12-25T00:00:00Z'
+          description: Auto-unpin date in UTC ISO 8601 format
 
     Error:
       type: object

@@ -102,6 +102,10 @@ async function createItem(event) {
     if (itemType === 'task') {
       item.status = 'active';
       item.subtasks = subtasks || [];
+      // If task is created with subtasks, mark it as having been in progress
+      if (subtasks && subtasks.length > 0) {
+        item.hasBeenInProgress = true;
+      }
       if (deadline) item.deadline = deadline;
     } else if (itemType === 'announcement') {
       item.priority = priority || 'normal';
@@ -276,6 +280,7 @@ async function getItems(event) {
 
 /**
  * DELETE /items/:sk - Delete an item
+ * Query parameter: forceDelete=true - Allows admin to delete any item including archived tasks
  */
 async function deleteItem(event) {
   console.log('Deleting item:', JSON.stringify(event, null, 2));
@@ -288,6 +293,10 @@ async function deleteItem(event) {
         message: 'No valid authorization token provided',
       });
     }
+
+    // Check if this is a force delete (admin only)
+    const forceDelete = event.queryStringParameters?.forceDelete === 'true';
+    const isAdmin = user.groups && user.groups.includes('Admin');
 
     // Extract item SK from path parameters
     const skParam = event.pathParameters?.sk;
@@ -316,17 +325,28 @@ async function deleteItem(event) {
 
     const item = queryResult.Items[0];
     
-    // Check permissions based on item type and ownership
-    const action = item.type === 'announcement' ? 'delete:announcement' : 'delete:task';
-    const resource = { userId: item.userId };
-    
-    if (!checkPermission(user, action, resource)) {
-      return createErrorResponse(403, 'Forbidden', 'You do not have permission to delete this item');
+    // If forceDelete is requested but user is not admin, deny
+    if (forceDelete && !isAdmin) {
+      return createErrorResponse(403, 'Forbidden', 'Only administrators can force delete items');
     }
+    
+    // Admin with forceDelete can delete anything (including archived tasks)
+    if (forceDelete && isAdmin) {
+      console.log('Admin force delete - bypassing all restrictions');
+      // Skip all permission checks and restrictions
+    } else {
+      // Normal delete: check permissions and restrictions
+      const action = item.type === 'announcement' ? 'delete:announcement' : 'delete:task';
+      const resource = { userId: item.userId };
+      
+      if (!checkPermission(user, action, resource)) {
+        return createErrorResponse(403, 'Forbidden', 'You do not have permission to delete this item');
+      }
 
-    // For tasks: only allow deletion if task has never been in progress (no subtasks history)
-    if (item.type === 'task' && item.hasBeenInProgress) {
-      return createErrorResponse(400, 'BadRequest', 'Cannot delete task that has been in progress. Please archive it instead.');
+      // For tasks: only allow deletion if task has never been in progress (no subtasks history)
+      if (item.type === 'task' && item.hasBeenInProgress) {
+        return createErrorResponse(400, 'BadRequest', 'Cannot delete task that has been in progress. Please archive it instead.');
+      }
     }
 
     // Delete the item
@@ -472,16 +492,46 @@ async function updateItem(event) {
 
         // Set completedAt when transitioning to completed
         if (newStatus === 'completed' && !item.completedAt) {
+          const now = new Date().toISOString();
           counter++;
           setExpressions.push(`#attr${counter} = :val${counter}`);
           expressionAttributeNames[`#attr${counter}`] = 'completedAt';
-          expressionAttributeValues[`:val${counter}`] = new Date().toISOString();
+          expressionAttributeValues[`:val${counter}`] = now;
           completedAtSet = true;
+          
+          // Set auto-archive timestamp:
+          // - If task has deadline and it's in the future: use deadline
+          // - Otherwise: use 3 minutes from now
+          let autoArchiveTime;
+          if (item.deadline) {
+            const deadlineTime = new Date(item.deadline).getTime();
+            const nowTime = Date.now();
+            if (deadlineTime > nowTime) {
+              // Deadline is in future, archive at deadline
+              autoArchiveTime = new Date(deadlineTime).toISOString();
+            } else {
+              // Deadline already passed, archive in 3 minutes
+              autoArchiveTime = new Date(nowTime + 3 * 60 * 1000).toISOString();
+            }
+          } else {
+            // No deadline, archive in 3 minutes
+            autoArchiveTime = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+          }
+          
+          counter++;
+          setExpressions.push(`#attr${counter} = :val${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
+          expressionAttributeValues[`:val${counter}`] = autoArchiveTime;
         } else if (newStatus !== 'completed' && item.completedAt) {
           // Remove completedAt if moving away from completed status
           counter++;
           removeExpressions.push(`#attr${counter}`);
           expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+          
+          // Also remove autoArchiveAt
+          counter++;
+          removeExpressions.push(`#attr${counter}`);
+          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
         }
       }
 

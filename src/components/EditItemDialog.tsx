@@ -12,6 +12,16 @@ import { SparkItem, SubTask } from '@/lib/types'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/helpers'
 
+// Convert UTC ISO string to datetime-local format (YYYY-MM-DDTHH:mm)
+function utcToLocal(utcString: string | undefined): string {
+  if (!utcString) return ''
+  const date = new Date(utcString)
+  // Get local time offset and adjust
+  const offset = date.getTimezoneOffset() * 60000
+  const localDate = new Date(date.getTime() - offset)
+  return localDate.toISOString().slice(0, 16)
+}
+
 interface EditItemDialogProps {
   item: SparkItem
   open: boolean
@@ -22,7 +32,7 @@ interface EditItemDialogProps {
 export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDialogProps) {
   const [title, setTitle] = useState(item.title)
   const [content, setContent] = useState(item.content || '')
-  const [deadline, setDeadline] = useState(item.type === 'task' ? item.deadline || '' : '')
+  const [deadline, setDeadline] = useState(item.type === 'task' ? utcToLocal(item.deadline) : '')
   const [subtasks, setSubtasks] = useState<SubTask[]>(item.type === 'task' ? item.subtasks || [] : [])
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -31,9 +41,9 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
   const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>(
     item.type === 'announcement' ? (item.priority as 'normal' | 'high' | 'urgent' || 'normal') : 'normal'
   )
-  const [expiresAt, setExpiresAt] = useState(item.type === 'announcement' ? item.expiresAt || '' : '')
+  const [expiresAt, setExpiresAt] = useState(item.type === 'announcement' ? utcToLocal(item.expiresAt) : '')
   const [isPinned, setIsPinned] = useState(item.type === 'announcement' ? item.isPinned || false : false)
-  const [pinnedUntil, setPinnedUntil] = useState(item.type === 'announcement' ? item.pinnedUntil || '' : '')
+  const [pinnedUntil, setPinnedUntil] = useState(item.type === 'announcement' ? utcToLocal(item.pinnedUntil) : '')
 
   // Reset form ONLY when dialog opens (not when item changes during editing)
   useEffect(() => {
@@ -41,7 +51,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
       console.log('EditItemDialog - Opening with item:', item)
       setTitle(item.title)
       setContent(item.content || '')
-      setDeadline(item.type === 'task' ? item.deadline || '' : '')
+      setDeadline(item.type === 'task' ? utcToLocal(item.deadline) : '')
       setSubtasks(item.type === 'task' ? item.subtasks || [] : [])
       setNewSubtaskTitle('')
       
@@ -53,9 +63,9 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
           pinnedUntil: item.pinnedUntil
         })
         setPriority((item.priority as 'normal' | 'high' | 'urgent') || 'normal')
-        setExpiresAt(item.expiresAt || '')
+        setExpiresAt(utcToLocal(item.expiresAt))
         setIsPinned(item.isPinned || false)
-        setPinnedUntil(item.pinnedUntil || '')
+        setPinnedUntil(utcToLocal(item.pinnedUntil))
       }
     }
     // Only depend on 'open' - don't reset when item changes during editing
@@ -117,13 +127,33 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
       }
 
       if (item.type === 'task') {
-        updates.deadline = deadline || undefined
+        // Convert datetime-local to ISO UTC format
+        if (deadline) {
+          const localDate = new Date(deadline)
+          updates.deadline = localDate.toISOString()
+        } else {
+          updates.deadline = undefined
+        }
         updates.subtasks = subtasks.length > 0 ? subtasks : undefined
       } else if (item.type === 'announcement') {
         updates.priority = priority
-        updates.expiresAt = expiresAt || undefined
+        
+        // Convert datetime-local to ISO UTC format
+        if (expiresAt) {
+          const localDate = new Date(expiresAt)
+          updates.expiresAt = localDate.toISOString()
+        } else {
+          updates.expiresAt = undefined
+        }
+        
         updates.isPinned = isPinned
-        updates.pinnedUntil = pinnedUntil || undefined
+        
+        if (pinnedUntil) {
+          const localDate = new Date(pinnedUntil)
+          updates.pinnedUntil = localDate.toISOString()
+        } else {
+          updates.pinnedUntil = undefined
+        }
       }
 
       await onSave(item.sk, updates as Partial<SparkItem>)
@@ -206,13 +236,13 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
             
             <div className="space-y-2">
               {subtasks.map((subtask) => (
-                <div key={subtask.id} className="flex items-center gap-2 p-2 rounded-lg border bg-card">
+                <div key={subtask.id} className="flex items-center gap-2 p-2 rounded-lg border bg-card transition-all duration-200 hover:bg-muted/50">
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => toggleSubtask(subtask.id)}
-                    className="h-6 w-6 flex-shrink-0"
+                    className="h-6 w-6 flex-shrink-0 transition-transform hover:scale-110"
                   >
                     {subtask.completed ? (
                       <CheckCircle size={16} weight="fill" className="text-green-600" />
@@ -233,7 +263,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                     variant="ghost"
                     size="icon"
                     onClick={() => removeSubtask(subtask.id)}
-                    className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                    className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-destructive transition-transform hover:scale-110"
                   >
                     <X size={14} />
                   </Button>
@@ -260,6 +290,7 @@ export function EditItemDialog({ item, open, onOpenChange, onSave }: EditItemDia
                 variant="outline"
                 size="icon"
                 disabled={!newSubtaskTitle.trim()}
+                className="transition-transform hover:scale-110"
               >
                 <Plus size={16} />
               </Button>

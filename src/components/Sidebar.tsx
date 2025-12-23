@@ -130,7 +130,7 @@ export function Sidebar({ items = [], isAdmin = false, className }: SidebarProps
           <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-card border border-border">
             <div className="flex items-center gap-2 text-sm">
               <Clock size={16} className="text-info" weight="duotone" />
-              <span className="text-foreground">Active</span>
+              <span className="text-foreground">In Progress</span>
             </div>
             <Badge variant="secondary">{activeTasks.length}</Badge>
           </div>
