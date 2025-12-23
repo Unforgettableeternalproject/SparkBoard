@@ -14,6 +14,7 @@ const {
   AdminDisableUserCommand,
   AdminEnableUserCommand,
   AdminDeleteUserCommand,
+  AdminUserGlobalSignOutCommand,
 } = require('@aws-sdk/client-cognito-identity-provider');
 
 const cognitoClient = new CognitoIdentityProviderClient({});
@@ -282,12 +283,42 @@ async function disableUser(event) {
   }
 
   try {
+    // Check if target user is an admin
+    const listGroupsCommand = new AdminListGroupsForUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    });
+    
+    const groupsResponse = await cognitoClient.send(listGroupsCommand);
+    const userGroups = (groupsResponse.Groups || []).map((g) => g.GroupName);
+    
+    if (userGroups.includes('Admin')) {
+      return createResponse(403, {
+        error: 'Forbidden',
+        message: 'Cannot disable administrator users',
+      });
+    }
+
     const command = new AdminDisableUserCommand({
       UserPoolId: USER_POOL_ID,
       Username: username,
     });
 
     await cognitoClient.send(command);
+
+    // Sign out all user sessions by calling AdminUserGlobalSignOut
+    const { AdminUserGlobalSignOutCommand } = require('@aws-sdk/client-cognito-identity-provider');
+    try {
+      const signOutCommand = new AdminUserGlobalSignOutCommand({
+        UserPoolId: USER_POOL_ID,
+        Username: username,
+      });
+      await cognitoClient.send(signOutCommand);
+      console.log(`User ${username} signed out from all sessions`);
+    } catch (signOutError) {
+      console.error('Error signing out user:', signOutError);
+      // Continue even if sign out fails
+    }
 
     console.log(`User ${username} disabled successfully`);
     return createResponse(200, {
@@ -401,6 +432,22 @@ async function deleteUser(event) {
       return createResponse(400, {
         error: 'ValidationError',
         message: 'User must be disabled before deletion',
+      });
+    }
+    
+    // Check if target user is an admin
+    const listGroupsCommand = new AdminListGroupsForUserCommand({
+      UserPoolId: USER_POOL_ID,
+      Username: username,
+    });
+    
+    const groupsResponse = await cognitoClient.send(listGroupsCommand);
+    const userGroups = (groupsResponse.Groups || []).map((g) => g.GroupName);
+    
+    if (userGroups.includes('Admin')) {
+      return createResponse(403, {
+        error: 'Forbidden',
+        message: 'Cannot delete administrator users',
       });
     }
 

@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [items, auth, health, uploads]
+        service: [items, auth, health, uploads, users, monitoring]
     
     steps:
       - name: Checkout code

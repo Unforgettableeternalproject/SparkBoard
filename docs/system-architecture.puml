@@ -1,0 +1,115 @@
+@startuml SparkBoard System Architecture
+
+skinparam rectangle {
+    BackgroundColor<<frontend>> #61DAFB
+    BorderColor<<frontend>> #333333
+    BackgroundColor<<cdn>> #8C4FFF
+    BorderColor<<cdn>> #333333
+    BackgroundColor<<api>> #FF9900
+    BorderColor<<api>> #333333
+    BackgroundColor<<compute>> #FF9900
+    BorderColor<<compute>> #333333
+    BackgroundColor<<data>> #4053D6
+    BorderColor<<data>> #333333
+    BackgroundColor<<auth>> #DD344C
+    BorderColor<<auth>> #333333
+    BackgroundColor<<automation>> #527FFF
+    BorderColor<<automation>> #333333
+    BackgroundColor<<monitoring>> #759C3E
+    BorderColor<<monitoring>> #333333
+}
+
+skinparam componentStyle rectangle
+
+title SparkBoard 系統架構圖
+
+actor User as user
+
+rectangle "前端層" <<frontend>> {
+    component "React + Vite\n響應式 UI" as react
+}
+
+rectangle "CDN & 存儲層" <<cdn>> {
+    component "CloudFront\nCDN 加速" as cf
+    component "S3 Bucket\n靜態網站" as s3web
+    component "S3 Bucket\n檔案存儲" as s3files
+}
+
+rectangle "API 層" <<api>> {
+    component "API Gateway\nREST API" as apigw
+}
+
+rectangle "計算層" <<compute>> {
+    component "Items Lambda\n任務/公告 CRUD" as lambda1
+    component "Auth Lambda\n用戶驗證" as lambda2
+    component "Uploads Lambda\n檔案上傳" as lambda3
+    component "Users Lambda\n用戶管理" as lambda4
+    component "AutoArchive Lambda\n自動封存" as lambda5
+}
+
+rectangle "數據層" <<data>> {
+    database "DynamoDB\n單表設計" as ddb
+}
+
+rectangle "身份認證層" <<auth>> {
+    component "Cognito\n身份認證" as cognito
+}
+
+rectangle "自動化層" <<automation>> {
+    component "EventBridge\n定時觸發" as eb
+    component "SQS\n任務隊列" as sqs
+}
+
+rectangle "監控層" <<monitoring>> {
+    component "CloudWatch\n日誌 & 指標" as cw
+    component "X-Ray\n分佈式追蹤" as xray
+}
+
+' 用戶訪問流程
+user --> react : HTTPS
+react --> cf : 訪問
+cf --> s3web : 加載靜態資源
+
+' API 請求流程
+react --> apigw : API 請求
+apigw --> lambda1
+apigw --> lambda2
+apigw --> lambda3
+apigw --> lambda4
+
+' 數據存儲
+lambda1 --> ddb : 讀寫
+lambda2 --> cognito : 驗證
+lambda3 --> s3files : Presigned URL
+lambda4 --> ddb : 用戶數據
+lambda4 --> cognito : 管理用戶
+
+' 自動化流程
+eb --> lambda5 : 每分鐘觸發
+lambda5 --> ddb : 查詢 & 更新
+lambda5 --> sqs : 異步任務
+
+' 監控
+lambda1 ..> cw : 日誌
+lambda2 ..> cw : 日誌
+lambda3 ..> cw : 日誌
+lambda4 ..> cw : 日誌
+lambda5 ..> cw : 日誌
+apigw ..> xray : 追蹤
+
+note right of ddb
+  **DynamoDB 單表設計**
+  PK: ORG#{orgId}
+  SK: ITEM#{itemId}
+  GSI1: userId-createdAt-index
+  GSI2: type-createdAt-index
+end note
+
+note right of cognito
+  **權限層級**
+  • Admin - 完整控制
+  • Moderators - 內容管理
+  • Users - 基本操作
+end note
+
+@enduml

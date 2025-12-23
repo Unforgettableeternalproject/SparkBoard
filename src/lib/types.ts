@@ -7,6 +7,7 @@ export interface User {
   role?: 'Admin' | 'Moderators' | 'Users'
   avatarUrl?: string
   bio?: string
+  theme?: 'light' | 'dark' | 'system'
 }
 
 export interface UserProfile {
@@ -88,8 +89,10 @@ export interface FileAttachment {
   name: string
   size: number
   type: string
-  dataUrl?: string
-  url?: string // S3 presigned URL for downloading
+  dataUrl?: string // Base64 data URL for preview (temporary, not stored)
+  url?: string // S3 URL for downloading
+  key?: string // S3 object key
+  file?: File // Original File object (temporary, for upload)
 }
 
 export interface CreateTaskInput {

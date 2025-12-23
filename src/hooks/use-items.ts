@@ -4,13 +4,19 @@ import { User } from '@/lib/types'
 import { toast } from 'sonner'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-const POLLING_INTERVAL = 120000 // 2 minutes (120 seconds)
+const POLLING_INTERVAL = 30000 // 30 seconds - decreased from 5 minutes
 
 export function useItems(user: User | null) {
   const [items, setItems] = useState<SparkItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastFetchTimeRef = useRef<number>(Date.now())
+  const itemsRef = useRef<SparkItem[]>([]) // Keep a ref to avoid dependency issues
+  
+  // Update itemsRef whenever items change
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
   
   // Fetch items from API
   const fetchItems = useCallback(async (silent = false) => {
@@ -41,12 +47,12 @@ export function useItems(user: User | null) {
       const data = await response.json()
       const newItems = data.items || []
       
-      // Check if there are changes (for polling)
-      if (silent && items.length > 0) {
+      // Check if there are changes (for polling) - use ref to avoid dependency
+      if (silent && itemsRef.current.length > 0) {
         const hasChanges = 
-          newItems.length !== items.length ||
+          newItems.length !== itemsRef.current.length ||
           JSON.stringify(newItems.map((i: SparkItem) => i.sk).sort()) !== 
-          JSON.stringify(items.map(i => i.sk).sort())
+          JSON.stringify(itemsRef.current.map(i => i.sk).sort())
         
         if (hasChanges) {
           console.log('[use-items] Changes detected, updating items')
@@ -67,7 +73,7 @@ export function useItems(user: User | null) {
     } finally {
       if (!silent) setIsLoading(false)
     }
-  }, [user, items])
+  }, [user]) // Remove items from dependencies
   
   // Initial fetch and setup polling
   useEffect(() => {
@@ -85,33 +91,40 @@ export function useItems(user: User | null) {
     fetchItems(false)
     
     // Setup polling interval
-    console.log('[use-items] Setting up polling interval (30s)')
     pollingIntervalRef.current = setInterval(() => {
-      console.log('[use-items] Polling for updates...')
       fetchItems(true)
     }, POLLING_INTERVAL)
+    
+    console.log(`[use-items] Polling started with ${POLLING_INTERVAL / 1000}s interval`)
     
     // Cleanup on unmount
     return () => {
       if (pollingIntervalRef.current) {
-        console.log('[use-items] Clearing polling interval')
+        console.log('[use-items] Polling stopped')
         clearInterval(pollingIntervalRef.current)
         pollingIntervalRef.current = null
       }
     }
   }, [user, fetchItems])
   
-  const createItem = async (input: CreateItemInput) => {
-    if (!user) return
+  const createItem = async (input: CreateItemInput): Promise<boolean> => {
+    if (!user) return false
     
     try {
       const idToken = localStorage.getItem('cognito_id_token')
       if (!idToken) {
         toast.error('Authentication required')
-        return
+        return false
       }
 
       console.log('use-items createItem - Sending to API:', input)
+      
+      // Convert datetime-local to ISO UTC string for deadline and date fields
+      const convertToUTC = (dateTimeLocal?: string) => {
+        if (!dateTimeLocal) return undefined
+        return new Date(dateTimeLocal).toISOString()
+      }
+      
       const response = await fetch(`${API_URL}/items`, {
         method: 'POST',
         headers: {
@@ -125,12 +138,12 @@ export function useItems(user: User | null) {
           attachments: input.attachments,
           // Task-specific fields
           subtasks: input.type === 'task' ? input.subtasks : undefined,
-          deadline: input.type === 'task' ? input.deadline : undefined,
+          deadline: input.type === 'task' ? convertToUTC(input.deadline) : undefined,
           // Announcement-specific fields
           priority: input.type === 'announcement' ? input.priority : undefined,
-          expiresAt: input.type === 'announcement' ? input.expiresAt : undefined,
+          expiresAt: input.type === 'announcement' ? convertToUTC(input.expiresAt) : undefined,
           isPinned: input.type === 'announcement' ? input.isPinned : undefined,
-          pinnedUntil: input.type === 'announcement' ? input.pinnedUntil : undefined,
+          pinnedUntil: input.type === 'announcement' ? convertToUTC(input.pinnedUntil) : undefined,
         }),
       })
 
@@ -172,13 +185,15 @@ export function useItems(user: User | null) {
       
       setItems((current) => [newItem, ...current])
       toast.success('Item created successfully')
+      return true
     } catch (error) {
       console.error('Error creating item:', error)
       toast.error('Failed to create item')
+      return false
     }
   }
   
-  const deleteItem = async (itemSk: string) => {
+  const deleteItem = async (itemSk: string, forceDelete: boolean = false) => {
     try {
       const idToken = localStorage.getItem('cognito_id_token')
       if (!idToken) {
@@ -189,7 +204,12 @@ export function useItems(user: User | null) {
       // Extract just the ID part if SK is in format ITEM#id
       const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
 
-      const response = await fetch(`${API_URL}/items/${encodeURIComponent(skValue)}`, {
+      // Add forceDelete query parameter if true
+      const url = forceDelete 
+        ? `${API_URL}/items/${encodeURIComponent(skValue)}?forceDelete=true`
+        : `${API_URL}/items/${encodeURIComponent(skValue)}`
+
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': idToken,
@@ -216,6 +236,24 @@ export function useItems(user: User | null) {
         return
       }
 
+      // Convert datetime-local to ISO UTC string for date fields
+      const convertToUTC = (dateTimeLocal?: string) => {
+        if (!dateTimeLocal) return undefined
+        return new Date(dateTimeLocal).toISOString()
+      }
+      
+      // Convert date fields if they exist in updates
+      const processedUpdates = { ...updates }
+      if ('deadline' in processedUpdates && processedUpdates.deadline) {
+        processedUpdates.deadline = convertToUTC(processedUpdates.deadline)
+      }
+      if ('expiresAt' in processedUpdates && processedUpdates.expiresAt) {
+        processedUpdates.expiresAt = convertToUTC(processedUpdates.expiresAt)
+      }
+      if ('pinnedUntil' in processedUpdates && processedUpdates.pinnedUntil) {
+        processedUpdates.pinnedUntil = convertToUTC(processedUpdates.pinnedUntil)
+      }
+
       // Extract just the ID part if SK is in format ITEM#id
       const skValue = itemSk.startsWith('ITEM#') ? itemSk.substring(5) : itemSk
 
@@ -225,7 +263,7 @@ export function useItems(user: User | null) {
           'Content-Type': 'application/json',
           'Authorization': idToken,
         },
-        body: JSON.stringify(updates),
+        body: JSON.stringify(processedUpdates),
       })
 
       if (!response.ok) {

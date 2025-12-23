@@ -1,0 +1,152 @@
+@startuml SparkBoard Serverless Workflow
+
+title SparkBoard 無伺服器工作流程
+
+actor User as user
+
+' ====== 工作流程 1: 用戶訪問靜態網站 ======
+box "靜態內容交付" #E1F5FF
+    participant "CloudFront\nCDN" as cf
+    participant "S3 Bucket\n靜態網站" as s3
+end box
+
+user -> cf: 1. 訪問網站 (HTTPS)
+activate cf
+cf -> s3: 2. 取得靜態資源
+activate s3
+s3 --> cf: 3. 返回 HTML/JS/CSS
+deactivate s3
+cf --> user: 4. 交付網站內容
+deactivate cf
+
+note right of cf
+  **快取策略**
+  • index.html: no-cache
+  • 其他資源: 1 年快取
+end note
+
+|||
+
+' ====== 工作流程 2: API 請求處理 ======
+box "API 處理層" #FFF4E6
+    participant "API Gateway" as apigw
+    participant "Lambda\n(Items)" as lambda
+end box
+
+box "數據層" #E8EAF6
+    participant "DynamoDB" as ddb
+end box
+
+user -> apigw: 5. POST /items\n(Bearer Token)
+activate apigw
+
+apigw -> apigw: 6. 驗證 JWT Token
+note right: 檢查 Cognito 簽發的 Token
+
+apigw -> lambda: 7. 觸發 Lambda
+activate lambda
+
+lambda -> lambda: 8. 解析請求參數
+lambda -> ddb: 9. PutItem 操作
+activate ddb
+ddb --> lambda: 10. 寫入成功
+deactivate ddb
+
+lambda --> apigw: 11. 返回結果 (201)
+deactivate lambda
+
+apigw --> user: 12. API 回應
+deactivate apigw
+
+|||
+
+' ====== 工作流程 3: 檔案上傳 ======
+box "上傳處理" #E8F5E9
+    participant "Uploads\nLambda" as upload_lambda
+    participant "S3 Bucket\n檔案存儲" as s3_files
+end box
+
+user -> apigw: 13. POST /uploads/presign
+activate apigw
+apigw -> upload_lambda: 14. 觸發 Lambda
+activate upload_lambda
+
+upload_lambda -> upload_lambda: 15. 生成 S3 Key\n(userId/date/uuid-file)
+upload_lambda -> s3_files: 16. 產生 Presigned URL
+activate s3_files
+s3_files --> upload_lambda: 17. 返回預簽名 URL\n(有效期 5 分鐘)
+deactivate s3_files
+
+upload_lambda --> apigw: 18. 返回 URL
+deactivate upload_lambda
+apigw --> user: 19. 預簽名 URL
+
+user -> s3_files: 20. PUT 直接上傳檔案
+activate s3_files
+s3_files --> user: 21. 上傳成功 (200)
+deactivate s3_files
+deactivate apigw
+
+note right of s3_files
+  **安全機制**
+  • 私有儲存桶
+  • 臨時授權 (5 分鐘)
+  • 檔案大小限制 10MB
+end note
+
+|||
+
+' ====== 工作流程 4: 自動封存任務 ======
+box "自動化層" #FFF3E0
+    participant "EventBridge" as eb
+    participant "AutoArchive\nLambda" as auto_lambda
+end box
+
+eb -> auto_lambda: 22. 每分鐘觸發 (Cron)
+activate auto_lambda
+
+auto_lambda -> ddb: 23. Scan 查詢\nautoArchiveAt <= now
+activate ddb
+ddb --> auto_lambda: 24. 返回需封存任務
+deactivate ddb
+
+loop 每個任務
+    auto_lambda -> auto_lambda: 25. 計算封存狀態\n(completed/partial/aborted)
+    auto_lambda -> ddb: 26. UpdateItem\n設定 archivedAt
+    activate ddb
+    ddb --> auto_lambda: 27. 更新成功
+    deactivate ddb
+end
+
+auto_lambda -> auto_lambda: 28. 記錄日誌
+deactivate auto_lambda
+
+note right of auto_lambda
+  **封存邏輯**
+  • 已完成任務超過截止日期
+  • 或完成後 3 分鐘
+  • 計算子任務完成度
+end note
+
+|||
+
+' ====== 工作流程 5: 監控與追蹤 ======
+box "監控層" #F1F8E9
+    participant "CloudWatch" as cw
+    participant "X-Ray" as xray
+end box
+
+lambda -[#green]-> cw: 持續記錄日誌
+auto_lambda -[#green]-> cw: 持續記錄日誌
+apigw -[#blue]-> xray: 請求追蹤
+lambda -[#blue]-> xray: 服務追蹤
+
+note right of cw
+  **監控項目**
+  • Lambda 執行時間
+  • API 錯誤率
+  • DynamoDB 讀寫量
+  • 告警通知
+end note
+
+@enduml

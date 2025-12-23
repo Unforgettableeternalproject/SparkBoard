@@ -6,18 +6,24 @@ import { FileText } from '@phosphor-icons/react'
 interface ItemListProps {
   items: SparkItem[]
   currentUser: User
-  onCreateItem: (input: CreateItemInput) => void
+  onCreateItem: (input: CreateItemInput) => Promise<boolean>
   onDeleteItem: (itemSk: string) => void
   onUpdateItem: (itemSk: string, updates: Partial<SparkItem>) => void
 }
 
 export function ItemList({ items, currentUser, onCreateItem, onDeleteItem, onUpdateItem }: ItemListProps) {
-  // Filter out archived tasks
+  // Filter out archived tasks and expired announcements
   const activeItems = items.filter(item => {
-    // Keep all announcements
-    if (item.type === 'announcement') return true
     // Filter out archived tasks
     if (item.type === 'task' && item.archivedAt) return false
+    
+    // Filter out expired announcements
+    if (item.type === 'announcement' && item.expiresAt) {
+      const now = new Date()
+      const expiryDate = new Date(item.expiresAt)
+      if (expiryDate < now) return false
+    }
+    
     return true
   })
 

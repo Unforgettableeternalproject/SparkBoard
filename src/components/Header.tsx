@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import LogoImage from '@/assets/Logo.png'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { getAvatarColor } from '@/lib/avatar-utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
@@ -15,33 +16,52 @@ interface HeaderProps {
   user: User
   onLogout: () => void
   items?: SparkItem[]
+  avatarVersion?: number
+  idToken?: string | null
 }
 
-export function Header({ user, onLogout, items = [] }: HeaderProps) {
-  const [isDark, setIsDark] = useState(false)
+export function Header({ user, onLogout, items = [], avatarVersion = 0, idToken }: HeaderProps) {
+  const [isDark, setIsDark] = useState(() => {
+    // Initialize from current DOM state
+    return document.documentElement.classList.contains('dark')
+  })
   
   useEffect(() => {
-    // Check for saved theme preference or default to light mode
-    const savedTheme = localStorage.getItem('theme')
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && prefersDark)
-    
-    setIsDark(shouldBeDark)
-    if (shouldBeDark) {
-      document.documentElement.classList.add('dark')
+    // Sync with DOM state on mount (in case it was changed elsewhere)
+    const currentIsDark = document.documentElement.classList.contains('dark')
+    if (currentIsDark !== isDark) {
+      setIsDark(currentIsDark)
     }
   }, [])
   
-  const toggleTheme = () => {
+  const toggleTheme = async () => {
     const newIsDark = !isDark
     setIsDark(newIsDark)
     
+    const newTheme = newIsDark ? 'dark' : 'light'
+    
     if (newIsDark) {
       document.documentElement.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
     } else {
       document.documentElement.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
+    }
+    localStorage.setItem('theme', newTheme)
+    
+    // Update theme preference in backend
+    if (idToken) {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL
+        await fetch(`${apiUrl}/auth/me`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': idToken,
+          },
+          body: JSON.stringify({ theme: newTheme }),
+        })
+      } catch (error) {
+        console.error('Failed to update theme preference:', error)
+      }
     }
   }
   
@@ -52,7 +72,10 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
     .toUpperCase()
     .slice(0, 2)
 
+  const avatarColor = getAvatarColor(user.id)
+
   const isAdmin = user['cognito:groups']?.includes('Admin') || false
+  const isModerator = user['cognito:groups']?.includes('Moderators') || false
 
   return (
     <header className="border-b border-border bg-card sticky top-0 z-10">
@@ -73,6 +96,11 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
             {isAdmin && (
               <Badge variant="default" className="text-xs">
                 Admin
+              </Badge>
+            )}
+            {!isAdmin && isModerator && (
+              <Badge variant="secondary" className="text-xs">
+                Moderator
               </Badge>
             )}
           </div>
@@ -158,9 +186,14 @@ export function Header({ user, onLogout, items = [] }: HeaderProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="rounded-full">
-                  <Avatar>
-                    {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.name} />}
-                    <AvatarFallback className="bg-primary text-primary-foreground">
+                  <Avatar key={avatarVersion}>
+                    {user.avatarUrl && (
+                      <AvatarImage 
+                        src={user.avatarUrl} 
+                        alt={user.name}
+                      />
+                    )}
+                    <AvatarFallback className={`${avatarColor} text-white`}>
                       {initials}
                     </AvatarFallback>
                   </Avatar>
