@@ -1,0 +1,158 @@
+@startuml SparkBoard Final System Architecture
+
+' 使用 PlantUML 內置元素（不依賴外部圖標庫，更穩定）
+skinparam linetype ortho
+skinparam rectangle {
+    BackgroundColor<<sync>> #E8F5E9
+    BorderColor<<sync>> #4CAF50
+    BackgroundColor<<async>> #FFF3E0
+    BorderColor<<async>> #FF9800
+    BackgroundColor<<taught>> #E3F2FD
+    BorderColor<<taught>> #2196F3
+    BackgroundColor<<default>> #F5F5F5
+    BorderColor<<default>> #333333
+}
+
+title SparkBoard 最終系統架構圖 (Final System Architecture)\n無伺服器任務與公告管理平台
+
+actor "使用者\nUser" as user
+
+rectangle "前端層 Frontend Layer" <<taught>> {
+    card "☁️ CloudFront\nCDN Distribution" as cf
+    card "💾 S3 Bucket\nStatic Website\nReact + Vite" as s3web
+}
+
+rectangle "認證層 Authentication Layer" <<taught>> {
+    card "🔑 Cognito\nUser Pool\nJWT Auth" as cognito
+}
+
+rectangle "API 層 API Layer" <<taught>> {
+    card "🌐 API Gateway\nREST API\nCognito Authorizer" as apigw
+}
+
+rectangle "同步計算層 Synchronous Compute" <<sync>> <<taught>> {
+    card "⚡ Items Lambda\nCRUD Operations\n課堂教過" as lambda_items
+    card "⚡ Auth Lambda\nUser Profile\n課堂教過" as lambda_auth
+    card "⚡ Uploads Lambda\nPresigned URLs\n課堂教過" as lambda_uploads
+    card "⚡ Users Lambda\nUser Mgmt (Admin)" as lambda_users
+    card "⚡ Health Lambda\nHealth Check" as lambda_health
+    card "⚡ Monitoring Lambda\nMetrics/Traces" as lambda_monitoring
+}
+
+rectangle "非同步計算層 Asynchronous Compute" <<async>> {
+    card "⚡ Notification Handler\nEmail Sending\n課堂教過" as lambda_notify
+    card "⚡ Auto-Archive Lambda\nScheduled Task" as lambda_archive
+    card "⚡ PostConfirm Trigger\nAuto Group Add" as lambda_postconfirm
+}
+
+rectangle "數據層 Data Layer" <<taught>> {
+    card "📊 DynamoDB\nSparkTable\nSingle Table Design\n+ GSI1, GSI2\n課堂教過" as ddb
+    card "💾 S3 Bucket\nFile Storage\nUploads" as s3files
+}
+
+rectangle "訊息層 Messaging Layer" <<async>> <<taught>> {
+    card "📨 SQS Queue\nNotification Queue\n+ DLQ\n課堂教過" as sqs
+    card "📧 SNS Topic\nEmail Service\n課堂教過" as sns
+}
+
+rectangle "自動化層 Automation Layer" <<async>> {
+    card "⏰ EventBridge\nCron Schedule\n(every 1 min)" as eb
+}
+
+rectangle "監控層 Observability Layer" {
+    card "📈 CloudWatch\nLogs + Metrics\nDashboard + Alarms" as cw
+    card "🔍 X-Ray\nDistributed Tracing" as xray
+}
+
+' User flows
+user -down-> cf : HTTPS
+cf -down-> s3web : Fetch\nStatic Files
+cf -down-> user : Cached\nContent
+
+user -down-> apigw : "REST API Calls\n(同步 Sync)"
+apigw -right-> cognito : Verify JWT\nToken
+cognito -left-> apigw : Valid/Invalid
+
+' Synchronous API flows (課堂教過)
+apigw -down-> lambda_items : "GET/POST/PATCH/DELETE /items\n(同步 Sync)"
+apigw -down-> lambda_auth : "GET/PATCH /auth/me\n(同步 Sync)"
+apigw -down-> lambda_uploads : "POST /uploads/presign\n(同步 Sync)"
+apigw -down-> lambda_users : "GET/POST /users/* (Admin)\n(同步 Sync)"
+apigw -down-> lambda_health : "GET /health\n(同步 Sync)"
+apigw -down-> lambda_monitoring : "GET /monitoring/*\n(同步 Sync)"
+
+' Lambda to DynamoDB (同步 課堂教過)
+lambda_items -down-> ddb : "PutItem/GetItem\nQuery/UpdateItem\n(同步 Sync)"
+lambda_auth -down-> ddb : "Query Profile\n(同步 Sync)"
+lambda_users -down-> ddb : "Scan Users\n(同步 Sync)"
+lambda_archive -down-> ddb : "Query + Update\n(同步 Sync)"
+
+' Lambda to S3
+lambda_uploads -down-> s3files : "Generate\nPresigned URL"
+
+' Asynchronous notification flow (課堂教過)
+lambda_items -down-> sqs : "Send Message\n(非同步 Async)\n課堂教過"
+sqs -down-> lambda_notify : "Trigger on\nMessage\n(非同步 Async)"
+lambda_notify -down-> sns : "Publish Email\n(非同步 Async)"
+lambda_notify -down-> ddb : "Query User\nData"
+sns -up-> user : Email\nNotification
+
+' EventBridge auto-archive (非同步)
+eb -down-> lambda_archive : "Cron Trigger\nevery 1 min\n(非同步 Async)"
+
+' Cognito trigger (非同步)
+cognito -down-> lambda_postconfirm : "Post-Confirmation\nTrigger\n(非同步 Async)"
+
+' Monitoring (課堂教過)
+lambda_items -up-> cw : "Logs + Metrics\n課堂教過"
+lambda_notify -up-> cw : "Logs + Metrics\n課堂教過"
+lambda_archive -up-> cw : "Logs + Metrics"
+apigw -up-> xray : "Traces\n課堂教過"
+lambda_items -up-> xray : "Traces"
+
+note right of lambda_items
+  **核心 Lambda 函數**
+  • Items: 任務/公告 CRUD
+  • Auth: 用戶資料管理
+  • Uploads: S3 檔案上傳
+  • Users: 管理員功能
+  • Health: 健康檢查
+  • Monitoring: 監控儀表板
+  
+  **All synchronous (同步)**
+end note
+
+note right of lambda_notify
+  **非同步處理**
+  • SQS 訊息佇列
+  • 最多重試 3 次
+  • DLQ 處理失敗訊息
+  • SNS 發送郵件通知
+  
+  **課堂教過的服務**
+end note
+
+note right of ddb
+  **Single Table Design**
+  • PK: ITEM#{id} / USER#{id}
+  • SK: METADATA / PROFILE
+  • GSI1: userId + createdAt
+  • GSI2: ITEM#ALL + createdAt
+  
+  **課堂教過**
+end note
+
+note bottom of eb
+  **定時任務**
+  • 每分鐘觸發
+  • 自動封存已完成任務
+  • EventBridge + Lambda
+end note
+
+legend right
+  |<#E8F5E9> 同步處理 (Synchronous) |
+  |<#FFF3E0> 非同步處理 (Asynchronous) |
+  |<#E3F2FD> 課堂教過的服務 (Taught in Class) |
+endlegend
+
+@enduml

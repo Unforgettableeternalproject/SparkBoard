@@ -293,12 +293,12 @@ export function useItems(user: User | null) {
           }
           return item
         })
-      
-      // Refresh items after updating to ensure consistency with server
-      setTimeout(() => fetchItems(true), 1000)
       )
       
       toast.success('Item updated successfully')
+      
+      // Refresh items after updating to ensure consistency with server
+      setTimeout(() => fetchItems(true), 1000)
     } catch (error) {
       console.error('Error updating item:', error)
       toast.error('Failed to update item')
@@ -307,10 +307,10 @@ export function useItems(user: User | null) {
   
   return {
     items,
-    isLoading,,
-    refreshItems: () => fetchItems(false), // Expose manual refresh
+    isLoading,
     createItem,
     deleteItem,
-    updateItem
+    updateItem,
+    refreshItems: () => fetchItems(false), // Expose manual refresh
   }
 }

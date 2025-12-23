@@ -333,7 +333,7 @@ export function CreateItemDialog({
         priority,
         expiresAt: expiresAtISO,
         isPinned,
-        pinnedUntil: pinnedUntilISO,,
+        pinnedUntil: pinnedUntilISO,
         sendEmailNotification, // Add this flag
         attachments: uploadedAttachments
       }

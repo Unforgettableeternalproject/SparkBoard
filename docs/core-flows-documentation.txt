@@ -1,0 +1,463 @@
+# SparkBoard 核心流程展示文件
+# Core Flows Documentation
+
+本文件詳細說明 SparkBoard 系統的核心流程，並標註需要收集的實作證據。
+
+---
+
+## 流程一：同步任務建立流程 (Synchronous Task Creation Flow)
+
+### 📋 流程概述
+
+用戶通過 API 創建新任務，系統同步處理請求並將資料儲存到 DynamoDB。
+
+**流程類型**: 同步 (Synchronous)  
+**課堂教過**: ✅ API Gateway, Lambda, DynamoDB
+
+### 🔄 流程步驟
+
+```
+用戶 → API Gateway → Lambda (Items) → DynamoDB → 回應給用戶
+```
+
+#### 詳細步驟說明：
+
+1. **用戶發送 API 請求**
+   - Method: `POST`
+   - Endpoint: `https://{api-id}.execute-api.{region}.amazonaws.com/prod/items`
+   - Headers:
+     ```
+     Authorization: Bearer {JWT_TOKEN}
+     Content-Type: application/json
+     ```
+   - Body:
+     ```json
+     {
+       "title": "完成期末報告",
+       "type": "task",
+       "description": "準備 SparkBoard 期末簡報與文件",
+       "status": "in-progress",
+       "deadline": "2025-12-31T23:59:59.000Z"
+     }
+     ```
+
+2. **API Gateway 驗證請求**
+   - 檢查 JWT Token 有效性
+   - Cognito Authorizer 驗證用戶身份
+   - 提取用戶 ID 從 Token
+
+3. **Lambda 函數處理**
+   - Function: `SparkBoard-Items`
+   - Runtime: Node.js 20.x
+   - 解析請求參數
+   - 生成唯一 ID (ulid)
+   - 構建 DynamoDB Item:
+     ```json
+     {
+       "PK": "ITEM#01JGXYZ123456789ABCDEF",
+       "SK": "METADATA",
+       "GSI1PK": "USER#google-oauth2|123456",
+       "GSI1SK": "2025-12-24T10:30:00.000Z",
+       "GSI2PK": "ITEM#ALL",
+       "GSI2SK": "2025-12-24T10:30:00.000Z",
+       "title": "完成期末報告",
+       "type": "task",
+       "description": "準備 SparkBoard 期末簡報與文件",
+       "status": "in-progress",
+       "deadline": "2025-12-31T23:59:59.000Z",
+       "createdBy": "google-oauth2|123456",
+       "createdAt": "2025-12-24T10:30:00.000Z",
+       "updatedAt": "2025-12-24T10:30:00.000Z"
+     }
+     ```
+
+4. **DynamoDB 寫入操作**
+   - Table: `SparkTable`
+   - Operation: `PutItem`
+   - 即時寫入，無需等待
+   - 回應成功/失敗狀態
+
+5. **回應給用戶**
+   - Status Code: `201 Created`
+   - Response Body:
+     ```json
+     {
+       "id": "01JGXYZ123456789ABCDEF",
+       "title": "完成期末報告",
+       "type": "task",
+       "status": "in-progress",
+       "createdAt": "2025-12-24T10:30:00.000Z"
+     }
+     ```
+
+### 📸 需要收集的實作證據
+
+#### 1. API 測試成功截圖 (`evidence/flow1-api-test.png`)
+
+**使用 curl 測試命令**:
+```bash
+# 取得 JWT Token (先執行)
+.\scripts\get-test-tokens.ps1
+
+# 建立任務 (使用上面獲得的 token)
+curl -X POST https://{api-id}.execute-api.{region}.amazonaws.com/prod/items \
+  -H "Authorization: Bearer eyJraWQ..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "完成期末報告",
+    "type": "task",
+    "description": "準備 SparkBoard 期末簡報與文件",
+    "status": "in-progress",
+    "deadline": "2025-12-31T23:59:59.000Z"
+  }'
+```
+
+**使用 Postman 測試**:
+- Collection: SparkBoard API
+- Request: POST Create Task
+- 確保顯示 201 Created 回應
+
+**截圖需包含**:
+- ✅ 完整的 API URL
+- ✅ Authorization Header (可隱藏部分 token)
+- ✅ Request Body
+- ✅ Response Status: 201
+- ✅ Response Body 包含新建立的 item
+
+#### 2. Lambda CloudWatch Logs (`evidence/flow1-lambda-logs.png`)
+
+**查看位置**:
+- AWS Console → CloudWatch → Log Groups
+- Log Group: `/aws/lambda/SparkBoard-Items`
+- 搜尋最新的 `POST /items` 請求
+
+**截圖需包含**:
+- ✅ Request ID
+- ✅ Event 輸入 (包含 userId, body)
+- ✅ DynamoDB PutItem 參數
+- ✅ 執行成功訊息
+- ✅ Duration (毫秒)
+- ✅ Memory Used
+
+**範例 Log 內容**:
+```
+START RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+[INFO] 2025-12-24T10:30:00.123Z Processing POST /items request
+[INFO] 2025-12-24T10:30:00.125Z User ID: google-oauth2|123456
+[INFO] 2025-12-24T10:30:00.130Z Writing to DynamoDB: ITEM#01JGXYZ123
+[INFO] 2025-12-24T10:30:00.145Z Successfully created item
+END RequestId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+REPORT Duration: 150.23 ms Billed Duration: 151 ms Memory Size: 512 MB Max Memory Used: 85 MB
+```
+
+#### 3. DynamoDB 資料驗證 (`evidence/flow1-dynamodb-data.png`)
+
+**查看位置**:
+- AWS Console → DynamoDB → Tables → SparkTable → Explore items
+- 或使用 AWS CLI:
+  ```bash
+  aws dynamodb get-item \
+    --table-name SparkTable \
+    --key '{"PK":{"S":"ITEM#01JGXYZ123456789ABCDEF"},"SK":{"S":"METADATA"}}'
+  ```
+
+**截圖需包含**:
+- ✅ PK 和 SK 值
+- ✅ GSI1PK 和 GSI1SK (用於查詢用戶的任務)
+- ✅ GSI2PK 和 GSI2SK (用於查詢所有任務)
+- ✅ title, type, status, deadline 等業務欄位
+- ✅ createdBy, createdAt, updatedAt 等元數據
+
+#### 4. CloudWatch Metrics (`evidence/flow1-metrics.png`)
+
+**查看位置**:
+- AWS Console → CloudWatch → Metrics → Lambda
+- 選擇 `SparkBoard-Items` 函數
+- 時間範圍: 最近 1 小時
+
+**截圖需包含至少 2 個指標**:
+- ✅ **Invocations** (調用次數): 顯示函數被調用的次數
+- ✅ **Duration** (執行時間): 平均約 100-200ms
+- 或 **Errors** (錯誤數): 應該為 0
+
+---
+
+## 流程二：非同步通知流程 (Asynchronous Notification Flow)
+
+### 📋 流程概述
+
+當任務完成或公告發布時，系統透過 SQS 佇列非同步發送郵件通知給相關用戶。
+
+**流程類型**: 非同步 (Asynchronous)  
+**課堂教過**: ✅ Lambda, SQS, SNS
+
+### 🔄 流程步驟
+
+```
+用戶標記任務完成 → Items Lambda → SQS Queue → Notification Handler Lambda → SNS → Email
+```
+
+#### 詳細步驟說明：
+
+1. **用戶更新任務狀態**
+   - Method: `PATCH`
+   - Endpoint: `https://{api-id}.execute-api.{region}.amazonaws.com/prod/items/{itemId}`
+   - Body:
+     ```json
+     {
+       "status": "completed"
+     }
+     ```
+
+2. **Items Lambda 處理更新**
+   - 更新 DynamoDB 中的任務狀態
+   - 檢測到 status 變更為 "completed"
+   - **發送訊息到 SQS 佇列** (非同步)
+
+3. **SQS 訊息佇列**
+   - Queue Name: `SparkBoard-NotificationQueue`
+   - Message Body:
+     ```json
+     {
+       "type": "TASK_COMPLETED",
+       "itemId": "01JGXYZ123456789ABCDEF",
+       "title": "完成期末報告",
+       "completedBy": "google-oauth2|123456",
+       "completedAt": "2025-12-24T15:45:00.000Z"
+     }
+     ```
+   - Visibility Timeout: 30 秒
+   - Max Receive Count: 3 (超過後進入 DLQ)
+
+4. **Notification Handler Lambda 被觸發**
+   - Function: `SparkBoard-NotificationHandler`
+   - 由 SQS 事件觸發 (非同步)
+   - 從 DynamoDB 查詢任務詳情
+   - 從 DynamoDB 查詢用戶郵件地址
+   - 構建郵件內容
+
+5. **SNS 發送郵件**
+   - Topic: `SparkBoard-Notifications`
+   - Subject: `[SparkBoard] 任務已完成: 完成期末報告`
+   - Message:
+     ```
+     您好，
+     
+     您的任務「完成期末報告」已標記為完成。
+     
+     完成時間: 2025-12-24 15:45:00 UTC
+     
+     感謝使用 SparkBoard!
+     ```
+
+6. **用戶收到郵件**
+   - 透過 AWS SES 或 SNS Email 發送
+   - 非同步處理，不阻塞 API 回應
+
+### 📸 需要收集的實作證據
+
+#### 1. API 測試成功截圖 (`evidence/flow2-api-test.png`)
+
+**使用 curl 測試命令**:
+```bash
+# 更新任務狀態為完成
+curl -X PATCH https://{api-id}.execute-api.{region}.amazonaws.com/prod/items/01JGXYZ123 \
+  -H "Authorization: Bearer eyJraWQ..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "completed"
+  }'
+```
+
+**截圖需包含**:
+- ✅ PATCH 請求成功 (200 OK)
+- ✅ Response 顯示 status 已更新為 "completed"
+
+#### 2. SQS 佇列深度 (`evidence/flow2-sqs-queue.png`)
+
+**查看位置**:
+- AWS Console → SQS → Queues → SparkBoard-NotificationQueue
+- 或使用 AWS CLI:
+  ```bash
+  aws sqs get-queue-attributes \
+    --queue-url https://sqs.{region}.amazonaws.com/{account-id}/SparkBoard-NotificationQueue \
+    --attribute-names All
+  ```
+
+**截圖需包含**:
+- ✅ Messages Available (可見訊息數)
+- ✅ Messages in Flight (處理中訊息數)
+- ✅ Messages Delayed (延遲訊息數)
+- ✅ 最近發送/接收的訊息時間戳
+
+**理想狀態**:
+- 如果處理快速，可能看到 0 個訊息 (已被消費)
+- 如果即時觀察，可以看到訊息進入和離開佇列
+
+#### 3. Notification Lambda Logs (`evidence/flow2-notification-logs.png`)
+
+**查看位置**:
+- CloudWatch → Log Groups → `/aws/lambda/SparkBoard-NotificationHandler`
+
+**截圖需包含**:
+- ✅ SQS Event 觸發記錄
+- ✅ 解析的訊息內容 (type, itemId)
+- ✅ DynamoDB 查詢用戶資料
+- ✅ SNS Publish 成功訊息
+- ✅ Message ID
+
+**範例 Log 內容**:
+```
+START RequestId: b2c3d4e5-f6a7-8901-bcde-f12345678901
+[INFO] 2025-12-24T15:45:05.123Z Processing 1 SQS messages
+[INFO] 2025-12-24T15:45:05.125Z Message type: TASK_COMPLETED
+[INFO] 2025-12-24T15:45:05.130Z Item ID: 01JGXYZ123456789ABCDEF
+[INFO] 2025-12-24T15:45:05.145Z Queried user email: user@example.com
+[INFO] 2025-12-24T15:45:05.200Z Published to SNS: MessageId=abc123-def456
+[INFO] 2025-12-24T15:45:05.205Z Successfully processed notification
+END RequestId: b2c3d4e5-f6a7-8901-bcde-f12345678901
+```
+
+#### 4. SNS 發送記錄或收到的郵件 (`evidence/flow2-sns-email.png`)
+
+**選項 A - CloudWatch Logs**:
+- SNS 沒有專門的 Log Group，但 Lambda logs 會顯示 MessageId
+
+**選項 B - 實際收到的郵件**:
+- 截圖收件匣中的通知郵件
+- 顯示主旨、內容、時間
+
+**截圖需包含**:
+- ✅ 郵件主旨: `[SparkBoard] 任務已完成`
+- ✅ 郵件內容包含任務標題
+- ✅ 收件時間 (應該在 API 調用後幾秒內)
+
+#### 5. DLQ 佇列監控 (`evidence/flow2-dlq.png`) - 可選
+
+**查看位置**:
+- SQS → SparkBoard-NotificationQueue-DLQ
+
+**截圖需包含**:
+- ✅ DLQ 訊息數量 (理想情況應為 0)
+- ✅ 如果有失敗訊息，顯示失敗原因
+
+---
+
+## 流程三：定時自動封存流程 (Scheduled Auto-Archive Flow) - 補充
+
+### 📋 流程概述
+
+EventBridge 定時觸發 Lambda 函數，自動封存已完成且超過截止日期的任務。
+
+**流程類型**: 非同步 (Event-Driven)  
+**課堂教過**: ✅ EventBridge, Lambda, DynamoDB
+
+### 🔄 流程步驟
+
+```
+EventBridge (Cron) → Auto-Archive Lambda → DynamoDB Query → Update Items
+```
+
+#### 詳細步驟說明：
+
+1. **EventBridge 定時觸發**
+   - Schedule Expression: `rate(1 minute)`
+   - Target: `SparkBoard-AutoArchive` Lambda
+
+2. **Lambda 查詢符合條件的任務**
+   - 條件: `status = "completed" AND deadline < NOW()`
+   - 使用 GSI2 查詢所有項目
+   - 過濾出需要封存的任務
+
+3. **批次更新任務狀態**
+   - 設定 `archived: true`
+   - 設定 `autoArchiveAt: {timestamp}`
+
+### 📸 需要收集的實作證據
+
+#### 1. EventBridge Rule (`evidence/flow3-eventbridge-rule.png`)
+
+**查看位置**:
+- AWS Console → EventBridge → Rules
+
+**截圖需包含**:
+- ✅ Rule Name: `SparkBoard-AutoArchiveSchedule`
+- ✅ Schedule Expression: `rate(1 minute)`
+- ✅ State: Enabled
+- ✅ Target: Lambda Function
+
+#### 2. Auto-Archive Lambda Logs (`evidence/flow3-archive-logs.png`)
+
+**範例 Log**:
+```
+[INFO] Starting auto-archive process
+[INFO] Found 3 completed tasks past deadline
+[INFO] Archiving: ITEM#01JGX001, ITEM#01JGX002, ITEM#01JGX003
+[INFO] Successfully archived 3 tasks
+```
+
+#### 3. DynamoDB 封存前後對比 (`evidence/flow3-before-after.png`)
+
+顯示任務的 `archived` 欄位從 `false` 變為 `true`。
+
+---
+
+## 📊 證據收集檢查清單
+
+### 流程一 (同步任務建立)
+- [ ] `flow1-api-test.png` - Postman/curl 創建任務成功
+- [ ] `flow1-lambda-logs.png` - Items Lambda 執行日誌
+- [ ] `flow1-dynamodb-data.png` - DynamoDB 中的新任務資料
+- [ ] `flow1-metrics.png` - Lambda Invocations/Duration 指標
+
+### 流程二 (非同步通知)
+- [ ] `flow2-api-test.png` - 更新任務狀態成功
+- [ ] `flow2-sqs-queue.png` - SQS 佇列深度/訊息數
+- [ ] `flow2-notification-logs.png` - Notification Lambda 日誌
+- [ ] `flow2-sns-email.png` - SNS 發送記錄或收到的郵件
+
+### 流程三 (定時封存) - 可選
+- [ ] `flow3-eventbridge-rule.png` - EventBridge 定時規則
+- [ ] `flow3-archive-logs.png` - Auto-Archive Lambda 日誌
+- [ ] `flow3-before-after.png` - DynamoDB 封存前後對比
+
+### 其他必要證據
+- [ ] `deploy-success.png` - CDK deploy 成功畫面
+- [ ] `metrics-dashboard.png` - CloudWatch Dashboard 總覽
+- [ ] `cloudwatch-alarms.png` - 告警設定截圖 (可選)
+
+---
+
+## 🎯 證據收集建議
+
+### 時機安排
+1. **先部署系統**: 確保所有 CDK stacks 都已部署成功
+2. **測試 API**: 使用 Postman 或 curl 測試各個端點
+3. **即時截圖**: 在測試後立即截圖 CloudWatch Logs (5-10 分鐘內)
+4. **查看 Metrics**: 等待 5-10 分鐘讓指標數據更新
+
+### 截圖技巧
+- 使用瀏覽器的無痕模式，避免個人資訊洩漏
+- 確保截圖包含完整的 AWS Console 標題列 (顯示服務名稱)
+- 使用高解析度截圖 (至少 1920x1080)
+- 可以使用 Windows 內建的「剪取工具」或 Snipping Tool
+- 重要數據可以用紅框或箭頭標註
+
+### 隱私保護
+- 可以隱藏 AWS Account ID (用馬賽克或黑條)
+- JWT Token 只顯示前後幾個字元
+- 郵件地址可以使用測試郵箱 (例如 test@example.com)
+
+---
+
+## ✅ 總結
+
+這兩個核心流程完整展示了：
+
+1. **同步處理**: API Gateway → Lambda → DynamoDB 的即時 CRUD 操作
+2. **非同步處理**: Lambda → SQS → Lambda → SNS 的事件驅動架構
+3. **課堂教過的服務**: API Gateway, Lambda, DynamoDB, SQS, SNS
+4. **可觀測性**: CloudWatch Logs, Metrics 記錄所有操作
+5. **可靠性**: SQS 重試機制, DLQ 處理失敗訊息
+
+按照本文件的指引收集證據截圖，即可滿足期末報告的「核心流程展示」要求。
