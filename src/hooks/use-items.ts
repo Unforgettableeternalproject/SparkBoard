@@ -4,7 +4,7 @@ import { User } from '@/lib/types'
 import { toast } from 'sonner'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-const POLLING_INTERVAL = 30000 // 30 seconds - decreased from 5 minutes
+const POLLING_INTERVAL = 120000 // 2 minutes - longer interval since we refresh on actions
 
 export function useItems(user: User | null) {
   const [items, setItems] = useState<SparkItem[]>([])
@@ -185,6 +185,10 @@ export function useItems(user: User | null) {
       
       setItems((current) => [newItem, ...current])
       toast.success('Item created successfully')
+      
+      // Refresh items after creating to ensure consistency
+      setTimeout(() => fetchItems(true), 1000)
+      
       return true
     } catch (error) {
       console.error('Error creating item:', error)
@@ -222,6 +226,9 @@ export function useItems(user: User | null) {
 
       setItems((current) => current.filter((item) => item.sk !== itemSk))
       toast.success('Item deleted successfully')
+      
+      // Refresh items after deleting to ensure consistency
+      setTimeout(() => fetchItems(true), 1000)
     } catch (error) {
       console.error('Error deleting item:', error)
       toast.error('Failed to delete item')
@@ -286,6 +293,9 @@ export function useItems(user: User | null) {
           }
           return item
         })
+      
+      // Refresh items after updating to ensure consistency with server
+      setTimeout(() => fetchItems(true), 1000)
       )
       
       toast.success('Item updated successfully')
@@ -297,7 +307,8 @@ export function useItems(user: User | null) {
   
   return {
     items,
-    isLoading,
+    isLoading,,
+    refreshItems: () => fetchItems(false), // Expose manual refresh
     createItem,
     deleteItem,
     updateItem

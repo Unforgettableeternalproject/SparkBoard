@@ -69,6 +69,7 @@ export function CreateItemDialog({
   const [expiresAt, setExpiresAt] = useState('')
   const [isPinned, setIsPinned] = useState(false)
   const [pinnedUntil, setPinnedUntil] = useState('')
+  const [sendEmailNotification, setSendEmailNotification] = useState(true) // Default to true
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -85,6 +86,7 @@ export function CreateItemDialog({
       setExpiresAt('')
       setIsPinned(false)
       setPinnedUntil('')
+      setSendEmailNotification(true)
     }
   }, [open, defaultType])
 
@@ -331,7 +333,8 @@ export function CreateItemDialog({
         priority,
         expiresAt: expiresAtISO,
         isPinned,
-        pinnedUntil: pinnedUntilISO,
+        pinnedUntil: pinnedUntilISO,,
+        sendEmailNotification, // Add this flag
         attachments: uploadedAttachments
       }
       console.log('CreateItemDialog - Creating announcement with data:', announcementData)
@@ -555,6 +558,25 @@ export function CreateItemDialog({
                   </p>
                 </div>
               )}
+
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="sendEmailNotification"
+                    checked={sendEmailNotification}
+                    onCheckedChange={(checked) => setSendEmailNotification(checked as boolean)}
+                  />
+                  <label 
+                    htmlFor="sendEmailNotification" 
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    📧 Send email notification to all members
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Unchecking this will only post the announcement without sending emails
+                </p>
+              </div>
             </>
           )}
 

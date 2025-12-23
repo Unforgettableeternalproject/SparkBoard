@@ -15,6 +15,7 @@ SparkBoard 是一個展示完整 AWS Serverless 應用的全端專案，包含�
 - ✅ **RESTful API**：API Gateway + Lambda 建立無伺服器 API
 - ✅ **資料儲存**：DynamoDB 單表設計 + GSI 索引查詢
 - ✅ **檔案上傳**：S3 Presigned URL
+- ✅ **郵件通知**：SQS + SNS 異步郵件通知系統
 - ✅ **CI/CD**：GitHub Actions 自動化部署
 - ✅ **監控日誌**：CloudWatch + X-Ray
 
@@ -30,7 +31,10 @@ SparkBoard 是一個展示完整 AWS Serverless 應用的全端專案，包含�
  [Lambda Functions] ──> [DynamoDB: SparkTable]
         │
         ├──> [S3: sparkboard-files]
-        └──> [Cognito User Pool]
+        ├──> [Cognito User Pool]
+        └──> [SQS Queue] ──> [Notification Lambda] ──> [SNS Topic] ──> 📧 Email
+                  ↓
+            [Dead Letter Queue]
 ```
 
 ## 🛠️ 技術堆疊
@@ -44,6 +48,8 @@ SparkBoard 是一個展示完整 AWS Serverless 應用的全端專案，包含�
 | DynamoDB | NoSQL 資料庫 |
 | Cognito | 使用者認證與授權 |
 | S3 | 檔案儲存 |
+| SQS | 訊息隊列 (郵件通知) |
+| SNS | 郵件發送服務 |
 | CloudWatch | 日誌與監控 |
 
 ### 前端
@@ -76,11 +82,14 @@ SparkBoard/
 │   ├── health/                # GET /health
 │   │   ├── index.js
 │   │   └── package.json
-│   └── items/                 # POST/GET /items
+│   ├── items/                 # POST/GET /items
+│   │   ├── index.js
+│   │   ├── index.test.js
+│   │   ├── package.json
+│   │   └── README.md
+│   └── notifications/         # SQS → Email (新增)
 │       ├── index.js
-│       ├── index.test.js
-│       ├── package.json
-│       └── README.md
+│       └── package.json
 │
 ├── src/                       # React 前端
 │   ├── components/            # UI 元件
@@ -122,22 +131,57 @@ cd services/health && npm install
 
 ### 2. 部署 AWS 基礎設施
 
+#### 方法 1: 一鍵部署所有 Stacks（推薦）
+
+```powershell
+# Windows
+.\scripts\deploy-all-stacks.ps1
+```
+
+此腳本會自動：
+- ✅ 檢查 CDK 和 AWS 配置
+- ✅ Bootstrap CDK（如需要）
+- ✅ 安裝所有依賴
+- ✅ 按正確順序部署所有 stacks
+- ✅ 顯示所有輸出值
+
+#### 方法 2: 逐步部署（用於除錯）
+
+```powershell
+# Windows - 逐個 stack 部署並顯示詳細進度
+.\scripts\deploy-stacks-step-by-step.ps1
+
+# 跳過特定 stack
+.\scripts\deploy-stacks-step-by-step.ps1 -SkipFrontend
+```
+
+#### 方法 3: 手動部署
+
 ```bash
 # CDK Bootstrap (首次使用)
 cd infra
 cdk bootstrap
 
 # 檢視變更
-npm run diff
+cdk diff
 
 # 部署所有堆疊
-npm run deploy
+cdk deploy --all --require-approval never
+
+# 或單獨部署
+cdk deploy SparkBoard-Storage
+cdk deploy SparkBoard-Auth
+cdk deploy SparkBoard-Api
+cdk deploy SparkBoard-Messaging
+cdk deploy SparkBoard-Monitoring
+cdk deploy SparkBoard-Frontend
 ```
 
 部署完成後，記下輸出的：
 - User Pool ID
 - User Pool Client ID
 - API Gateway URL
+- Notification Queue URL
 
 ### 3. 設定環境變數
 
@@ -254,8 +298,51 @@ API Gateway → Lambda → DynamoDB
 - DynamoDB: 25GB 儲存 + 讀寫容量
 - API Gateway: 100 萬次呼叫/月
 - S3: 5GB 儲存
+- SQS: 100 萬次請求/月
+- SNS: 100 萬次發布 + 1000 封郵件/月
 
 **預估月成本**: NT$0 ~ $30 (超過免費額度後)
+
+## 📧 郵件通知系統
+
+SparkBoard 整合了 SQS 和 SNS 提供異步郵件通知功能。
+
+### 支援的通知類型
+
+- ✅ **任務完成通知** - 當任務狀態變更為 completed 時發送
+- ✅ **公告通知** - 新公告發布時發送給所有用戶
+- 🔜 **任務分配通知** - 任務被指派給用戶時發送（未來功能）
+
+### 快速部署
+
+```powershell
+# 部署郵件通知系統
+cd scripts
+.\deploy-messaging.ps1
+
+# 訂閱 SNS 主題接收郵件
+aws sns subscribe \
+  --topic-arn <TOPIC-ARN> \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+
+# 測試通知系統
+.\test-notifications.ps1
+```
+
+### 架構圖
+
+```
+Items Lambda → SQS Queue → Notification Lambda → SNS Topic → 📧 Email
+                  ↓
+            Dead Letter Queue (失敗重試)
+```
+
+### 詳細文檔
+
+- 📖 [部署指南](./docs/EMAIL_NOTIFICATION_DEPLOYMENT.md)
+- 📝 [實現總結](./docs/NOTIFICATION_SYSTEM_SUMMARY.md)
+- 📚 [功能規格](./docs/FEATURES.md#郵件通知系統)
 
 ## 🚀 CI/CD Pipeline
 
@@ -319,13 +406,35 @@ npm run preview      # 預覽建置結果
 npm run lint         # ESLint 檢查
 ```
 
-### CDK
+### CDK 部署
+
+#### 完整部署（首次或生產環境）
+```powershell
+# 一鍵部署所有 stacks（15-20 分鐘）
+.\scripts\deploy-all-stacks.ps1
+
+# 或逐步部署（便於追蹤進度）
+.\scripts\deploy-stacks-step-by-step.ps1
+```
+
+#### 快速開發部署
+```bash
+# 只部署改動的 stack（3-5 分鐘）
+cd infra
+cdk deploy SparkBoard-Api --require-approval never
+
+# 使用 hotswap 快速部署 Lambda 更改（30-60 秒）⚡
+cdk deploy SparkBoard-Api --hotswap --require-approval never
+```
+
+#### 其他 CDK 指令
 ```bash
 npm run cdk:synth    # 合成 CloudFormation 範本
 npm run cdk:diff     # 檢視變更
-npm run cdk:deploy   # 部署
 npm run cdk:destroy  # 清除所有資源
 ```
+
+**💡 部署時間優化**: 查看 [部署時間優化指南](./docs/DEPLOYMENT_TIME_OPTIMIZATION.md) 了解如何將部署時間從 15-20 分鐘減少到 30-60 秒。
 
 ### 測試
 ```bash

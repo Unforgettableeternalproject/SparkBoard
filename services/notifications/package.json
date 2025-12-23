@@ -1,0 +1,15 @@
+{
+  "name": "sparkboard-notifications",
+  "version": "1.0.0",
+  "description": "SparkBoard notification handler",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.410.0",
+    "@aws-sdk/lib-dynamodb": "^3.410.0",
+    "@aws-sdk/client-sns": "^3.410.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.410.0"
+  }
+}

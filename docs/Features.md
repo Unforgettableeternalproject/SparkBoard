@@ -8,6 +8,7 @@
 - [核心功能](#核心功能)
 - [任務管理系統](#任務管理系統)
 - [公告系統](#公告系統)
+- [郵件通知系統](#郵件通知系統)
 - [自動封存機制](#自動封存機制)
 - [檔案附件管理](#檔案附件管理)
 - [用戶管理](#用戶管理)
@@ -26,13 +27,14 @@ SparkBoard 是一個完整的任務與公告管理平台，具備以下核心特
 | 🔐 **身份驗證** | AWS Cognito 整合，支援 Email/密碼登入和 OAuth |
 | 📝 **任務管理** | 完整的任務生命週期管理，包含子任務和截止日期 |
 | 📢 **公告系統** | 版主可發布公告，支援置頂和過期設定 |
+| � **郵件通知** | SQS/SNS 整合，自動發送任務完成和公告通知郵件 |
 | 📎 **檔案附件** | S3 整合，支援圖片、PDF、Office 文件上傳 |
 | ⚡ **自動封存** | 已完成任務在截止日期後自動封存 |
 | 👥 **角色權限** | 三級權限系統：管理員、版主、一般用戶 |
 | 📊 **監控儀表板** | 管理員可查看系統指標和性能數據 |
 | 🎨 **響應式設計** | 支援桌面和移動裝置 |
 | 🌙 **暗黑模式** | 支援淺色/深色主題切換 |
-| 🔄 **即時更新** | 自動輪詢最新資料（2 分鐘間隔）|
+| 🔄 **即時更新** | 自動輪詢最新資料（5 分鐘間隔）|
 
 ---
 
@@ -311,6 +313,362 @@ function isExpired(announcement: Announcement): boolean {
 **刪除限制：**
 - 版主和管理員可刪除任何公告
 - 一般用戶無法刪除公告
+
+---
+
+## 📧 郵件通知系統
+
+### 功能概覽
+
+SparkBoard 整合了 AWS SQS 和 SNS，提供可靠的異步郵件通知服務。當重要事件發生時（如任務完成、發布公告），系統會自動發送郵件通知給相關用戶。
+
+### 架構設計
+
+#### 組件架構
+
+```
+Items Lambda → SQS Queue → Notification Lambda → SNS Topic → Email
+                    ↓
+              Dead Letter Queue (失敗重試)
+```
+
+**組件說明：**
+
+| 組件 | 類型 | 功能 |
+|------|------|------|
+| Notification Queue | SQS | 主要通知隊列，緩存待處理的通知 |
+| Dead Letter Queue | SQS | 接收處理失敗的訊息（3 次重試後） |
+| Notification Topic | SNS | 郵件發送主題，支援多訂閱者 |
+| Notification Handler | Lambda | 處理 SQS 訊息，格式化並發送郵件 |
+
+#### SQS 配置
+
+```typescript
+{
+  queueName: 'SparkBoard-Notification-Queue',
+  visibilityTimeout: 300,        // 5 分鐘
+  receiveMessageWaitTime: 20,    // 長輪詢 20 秒
+  deadLetterQueue: {
+    queue: deadLetterQueue,
+    maxReceiveCount: 3            // 重試 3 次後進入 DLQ
+  }
+}
+```
+
+#### Lambda 事件源
+
+```typescript
+{
+  batchSize: 10,                   // 一次處理 10 條訊息
+  maxBatchingWindow: 5,            // 最多等待 5 秒湊批次
+}
+```
+
+### 通知類型
+
+#### 1. 任務完成通知
+
+**觸發條件：**
+- 任務狀態從 `active` 變更為 `completed`
+- 所有子任務標記為完成
+
+**訊息格式：**
+```json
+{
+  "type": "TASK_COMPLETED",
+  "userId": "abc-123-def",
+  "itemId": "task-456",
+  "orgId": "default",
+  "title": "完成需求文檔撰寫",
+  "completedBy": "user@example.com"
+}
+```
+
+**郵件內容：**
+```
+主旨：✅ Task Completed: 完成需求文檔撰寫
+
+Hi there,
+
+Your task "完成需求文檔撰寫" has been marked as completed.
+
+Task Details:
+- Title: 完成需求文檔撰寫
+- Completed by: user@example.com
+- Completed at: 2025-11-25 18:30:00
+- Original deadline: 2025-11-26 00:00:00
+
+Subtasks (3/3 completed):
+  ✓ 收集需求
+  ✓ 撰寫文檔
+  ✓ 團隊審核
+
+View your tasks at: https://sparkboard.example.com
+```
+
+#### 2. 任務分配通知
+
+**觸發條件：**
+- 新任務被創建並指派給特定用戶（未來功能）
+
+**訊息格式：**
+```json
+{
+  "type": "TASK_ASSIGNED",
+  "userId": "user-id",
+  "itemId": "task-id",
+  "orgId": "default",
+  "title": "設計新功能 UI",
+  "assignedBy": "manager@example.com"
+}
+```
+
+#### 3. 公告通知
+
+**觸發條件：**
+- 新公告被創建
+- 公告優先級為 `high` 或 `urgent`
+
+**訊息格式：**
+```json
+{
+  "type": "ANNOUNCEMENT",
+  "title": "系統維護通知",
+  "content": "系統將於本週五晚上 10 點進行維護...",
+  "priority": "urgent",
+  "createdBy": "admin@example.com",
+  "orgId": "default"
+}
+```
+
+**郵件內容：**
+```
+主旨：🚨 Announcement: 系統維護通知
+
+SparkBoard Announcement
+
+系統將於本週五晚上 10 點進行維護，預計需要 2 小時...
+
+---
+Posted by: admin@example.com
+Priority: Urgent
+Time: 2025-11-25 14:00:00
+
+View more at: https://sparkboard.example.com
+```
+
+### 實現細節
+
+#### Items Lambda 發送通知
+
+```javascript
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs')
+const sqsClient = new SQSClient({})
+
+// 在任務完成時發送通知
+if (newStatus === 'completed' && completedAtSet) {
+  await sqsClient.send(new SendMessageCommand({
+    QueueUrl: process.env.NOTIFICATION_QUEUE_URL,
+    MessageBody: JSON.stringify({
+      type: 'TASK_COMPLETED',
+      userId: item.userId,
+      itemId: item.itemId,
+      orgId: user.orgId,
+      title: item.title,
+      completedBy: user.email
+    })
+  }))
+}
+```
+
+#### Notification Handler 處理邏輯
+
+```javascript
+exports.handler = async (event) => {
+  // 處理每條 SQS 訊息
+  for (const record of event.Records) {
+    const message = JSON.parse(record.body)
+    
+    switch (message.type) {
+      case 'TASK_COMPLETED':
+        await processTaskCompletion(message)
+        break
+      
+      case 'TASK_ASSIGNED':
+        await processTaskAssignment(message)
+        break
+      
+      case 'ANNOUNCEMENT':
+        await processAnnouncement(message)
+        break
+    }
+  }
+}
+
+async function processTaskCompletion(event) {
+  // 1. 從 Cognito 獲取用戶郵箱
+  const userEmail = await getUserEmail(event.userId)
+  
+  // 2. 從 DynamoDB 獲取任務詳情
+  const item = await getItemDetails(event.orgId, event.itemId)
+  
+  // 3. 格式化郵件內容
+  const subject = `✅ Task Completed: ${event.title}`
+  const message = formatTaskCompletionEmail(event, item)
+  
+  // 4. 透過 SNS 發送郵件
+  await sendEmailNotification(userEmail, subject, message)
+}
+```
+
+#### SNS 郵件發送
+
+```javascript
+const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns')
+const snsClient = new SNSClient({})
+
+async function sendEmailNotification(email, subject, message) {
+  await snsClient.send(new PublishCommand({
+    TopicArn: process.env.SNS_TOPIC_ARN,
+    Subject: subject,
+    Message: message,
+    MessageAttributes: {
+      email: {
+        DataType: 'String',
+        StringValue: email
+      }
+    }
+  }))
+}
+```
+
+### 錯誤處理
+
+#### 重試機制
+
+**SQS 配置：**
+- 可見性超時：5 分鐘
+- 最大接收次數：3 次
+- 失敗後進入 DLQ
+
+**Lambda 處理：**
+```javascript
+try {
+  await processNotification(message)
+} catch (error) {
+  console.error('Error processing notification:', error)
+  // Lambda 返回錯誤，SQS 自動重試
+  throw error
+}
+```
+
+#### Dead Letter Queue
+
+**DLQ 配置：**
+```typescript
+{
+  queueName: 'SparkBoard-Notification-DLQ',
+  retentionPeriod: 14 days
+}
+```
+
+**監控：**
+- CloudWatch Alarm 當 DLQ 有訊息時觸發
+- 管理員可檢視 DLQ 中的失敗訊息
+- 手動重新處理或分析失敗原因
+
+### 部署與測試
+
+#### 部署 MessagingStack
+
+```powershell
+# 執行部署腳本
+.\scripts\deploy-messaging.ps1
+
+# 腳本會：
+# 1. 安裝 notifications 服務依賴
+# 2. 更新 items 服務依賴（SQS SDK）
+# 3. 部署 MessagingStack (SQS + SNS + Lambda)
+# 4. 重新部署 ApiStack（添加 SQS 權限）
+```
+
+#### 訂閱 SNS 主題
+
+```bash
+# 方法 1: AWS Console
+1. 前往 SNS Console
+2. 選擇 SparkBoard-Notifications topic
+3. Create subscription → Email → 輸入郵箱
+4. 確認訂閱郵件
+
+# 方法 2: AWS CLI
+aws sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:xxx:SparkBoard-Notifications \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+```
+
+#### 測試通知
+
+```powershell
+# 發送測試通知
+.\scripts\test-notifications.ps1
+
+# 腳本會發送：
+# 1. TASK_COMPLETED 測試訊息
+# 2. ANNOUNCEMENT 測試訊息
+
+# 檢查結果：
+# - CloudWatch Logs: /aws/lambda/SparkBoard-NotificationHandler
+# - SQS Queue metrics
+# - 郵箱收件
+```
+
+### 監控與日誌
+
+#### CloudWatch 指標
+
+**SQS 指標：**
+- `NumberOfMessagesSent` - 發送的訊息數量
+- `NumberOfMessagesReceived` - 接收的訊息數量
+- `ApproximateAgeOfOldestMessage` - 最舊訊息年齡
+- `NumberOfMessagesDeleted` - 成功處理的訊息數量
+
+**SNS 指標：**
+- `NumberOfNotificationsSent` - 發送的通知數量
+- `NumberOfNotificationsFailed` - 失敗的通知數量
+
+**Lambda 指標：**
+- 執行次數
+- 錯誤率
+- 執行時間
+
+#### Lambda 日誌
+
+```
+/aws/lambda/SparkBoard-NotificationHandler
+
+[INFO] Notification handler triggered: 10 messages
+[INFO] Processing message: TASK_COMPLETED
+[INFO] User email: user@example.com
+[INFO] Email notification sent to user@example.com
+[INFO] All messages processed successfully
+```
+
+### 成本優化
+
+**設計考量：**
+- ✅ SQS 長輪詢減少空請求
+- ✅ Lambda 批次處理（10 條/次）
+- ✅ 非同步處理不阻塞主流程
+- ✅ 重試機制避免訊息丟失
+- ✅ DLQ 隔離問題訊息
+
+**預估成本（每月）：**
+- SQS: $0.40 per 1M requests → ~$0.01 (1000 notifications)
+- SNS: $0.50 per 1M requests → ~$0.01 (1000 emails)
+- Lambda: $0.20 per 1M requests → ~$0.01 (included in free tier)
+- **總計：** <$0.10/月 (低流量情況)
 
 ---
 

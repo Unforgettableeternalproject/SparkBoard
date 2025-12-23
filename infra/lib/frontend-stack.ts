@@ -64,7 +64,7 @@ export class FrontendStack extends cdk.Stack {
     // CloudFront Distribution
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       defaultBehavior: {
-        origin: new origins.S3Origin(this.bucket, {
+        origin: origins.S3BucketOrigin.withOriginAccessIdentity(this.bucket, {
           originAccessIdentity: oai,
         }),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

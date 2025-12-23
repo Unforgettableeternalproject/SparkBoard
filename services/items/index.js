@@ -8,6 +8,7 @@
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
 const { v4: uuidv4 } = require('uuid');
 const { getUserFromEvent, checkPermission, createResponse, createErrorResponse } = require('./permissions');
 
@@ -20,7 +21,34 @@ const docClient = DynamoDBDocumentClient.from(client, {
   },
 });
 
+// Initialize SQS client
+const sqsClient = new SQSClient({});
+
 const TABLE_NAME = process.env.TABLE_NAME;
+const NOTIFICATION_QUEUE_URL = process.env.NOTIFICATION_QUEUE_URL;
+
+/**
+ * Send notification to SQS queue
+ */
+async function sendNotification(message) {
+  if (!NOTIFICATION_QUEUE_URL) {
+    console.warn('NOTIFICATION_QUEUE_URL not configured, skipping notification');
+    return;
+  }
+
+  try {
+    const command = new SendMessageCommand({
+      QueueUrl: NOTIFICATION_QUEUE_URL,
+      MessageBody: JSON.stringify(message),
+    });
+
+    await sqsClient.send(command);
+    console.log('Notification sent to queue:', message.type);
+  } catch (error) {
+    // Don't fail the main operation if notification fails
+    console.error('Error sending notification:', error);
+  }
+}
 
 /**
  * POST /items - Create a new item
@@ -123,6 +151,21 @@ async function createItem(event) {
     await docClient.send(command);
 
     console.log('Item created successfully:', itemId);
+
+    // Send notification for new announcement (only if sendEmailNotification is true)
+    if (itemType === 'announcement' && requestBody.sendEmailNotification !== false) {
+      console.log('Sending announcement notification email');
+      await sendNotification({
+        type: 'ANNOUNCEMENT',
+        title: item.title,
+        content: item.content,
+        priority: item.priority || 'normal',
+        createdBy: user.email || user.name,
+        orgId: user.orgId,
+      });
+    } else if (itemType === 'announcement') {
+      console.log('Skipping announcement notification email (sendEmailNotification is false)');
+    }
 
     return createResponse(201, {
       success: true,
@@ -489,50 +532,52 @@ async function updateItem(event) {
         expressionAttributeNames[`#attr${counter}`] = 'status';
         expressionAttributeValues[`:val${counter}`] = newStatus;
         statusUpdated = true;
+      }
 
-        // Set completedAt when transitioning to completed
-        if (newStatus === 'completed' && !item.completedAt) {
-          const now = new Date().toISOString();
-          counter++;
-          setExpressions.push(`#attr${counter} = :val${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
-          expressionAttributeValues[`:val${counter}`] = now;
-          completedAtSet = true;
-          
-          // Set auto-archive timestamp:
-          // - If task has deadline and it's in the future: use deadline
-          // - Otherwise: use 3 minutes from now
-          let autoArchiveTime;
-          if (item.deadline) {
-            const deadlineTime = new Date(item.deadline).getTime();
-            const nowTime = Date.now();
-            if (deadlineTime > nowTime) {
-              // Deadline is in future, archive at deadline
-              autoArchiveTime = new Date(deadlineTime).toISOString();
-            } else {
-              // Deadline already passed, archive in 3 minutes
-              autoArchiveTime = new Date(nowTime + 3 * 60 * 1000).toISOString();
-            }
+      // Set completedAt and autoArchiveAt when task becomes or remains completed without these fields
+      if (newStatus === 'completed' && !item.completedAt) {
+        const now = new Date().toISOString();
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+        expressionAttributeValues[`:val${counter}`] = now;
+        completedAtSet = true;
+        
+        // Set auto-archive timestamp:
+        // - If task has deadline and it's in the future: use deadline
+        // - Otherwise: use 3 minutes from now
+        let autoArchiveTime;
+        if (item.deadline) {
+          const deadlineTime = new Date(item.deadline).getTime();
+          const nowTime = Date.now();
+          if (deadlineTime > nowTime) {
+            // Deadline is in future, archive at deadline
+            autoArchiveTime = new Date(deadlineTime).toISOString();
           } else {
-            // No deadline, archive in 3 minutes
-            autoArchiveTime = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+            // Deadline already passed, archive in 3 minutes
+            autoArchiveTime = new Date(nowTime + 3 * 60 * 1000).toISOString();
           }
-          
-          counter++;
-          setExpressions.push(`#attr${counter} = :val${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
-          expressionAttributeValues[`:val${counter}`] = autoArchiveTime;
-        } else if (newStatus !== 'completed' && item.completedAt) {
-          // Remove completedAt if moving away from completed status
-          counter++;
-          removeExpressions.push(`#attr${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'completedAt';
-          
-          // Also remove autoArchiveAt
-          counter++;
-          removeExpressions.push(`#attr${counter}`);
-          expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
+        } else {
+          // No deadline, archive in 3 minutes
+          autoArchiveTime = new Date(Date.now() + 3 * 60 * 1000).toISOString();
         }
+        
+        counter++;
+        setExpressions.push(`#attr${counter} = :val${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
+        expressionAttributeValues[`:val${counter}`] = autoArchiveTime;
+        
+        console.log('Setting autoArchiveAt:', autoArchiveTime, 'for task:', item.SK);
+      } else if (newStatus !== 'completed' && item.completedAt) {
+        // Remove completedAt if moving away from completed status
+        counter++;
+        removeExpressions.push(`#attr${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'completedAt';
+        
+        // Also remove autoArchiveAt
+        counter++;
+        removeExpressions.push(`#attr${counter}`);
+        expressionAttributeNames[`#attr${counter}`] = 'autoArchiveAt';
       }
 
       if (body.deadline !== undefined) {
@@ -681,6 +726,18 @@ async function updateItem(event) {
     const updateResult = await docClient.send(updateCommand);
 
     console.log('Item updated successfully:', sk);
+
+    // Send notification if task was completed
+    if (newStatus === 'completed' && completedAtSet) {
+      await sendNotification({
+        type: 'TASK_COMPLETED',
+        userId: item.userId,
+        itemId: item.itemId,
+        orgId: user.orgId,
+        title: updateResult.Attributes.title || item.title,
+        completedBy: user.email || user.name,
+      });
+    }
 
     return createResponse(200, {
       success: true,

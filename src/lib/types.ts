@@ -113,6 +113,7 @@ export interface CreateAnnouncementInput {
   isPinned?: boolean
   pinnedUntil?: string
   attachments?: FileAttachment[]
+  sendEmailNotification?: boolean // Whether to send email to all members
 }
 
 export type CreateItemInput = CreateTaskInput | CreateAnnouncementInput

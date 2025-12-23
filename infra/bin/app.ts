@@ -6,6 +6,7 @@ import { AuthStack } from '../lib/auth-stack';
 import { ApiStack } from '../lib/api-stack';
 import { MonitoringStack } from '../lib/monitoring-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { MessagingStack } from '../lib/messaging-stack';
 
 const app = new cdk.App();
 
@@ -55,7 +56,15 @@ const monitoringStack = new MonitoringStack(app, `${stackPrefix}-Monitoring`, {
   alarmEmail,
 });
 
-// 5. Frontend Stack - S3 + CloudFront
+// 5. Messaging Stack - SQS + SNS + Notification Handler
+const messagingStack = new MessagingStack(app, `${stackPrefix}-Messaging`, {
+  env,
+  description: 'SparkBoard Messaging - SQS Queue, SNS Topic, and Notification Handler',
+  table: storageStack.table,
+  userPool: authStack.userPool,
+});
+
+// 6. Frontend Stack - S3 + CloudFront
 const frontendStack = new FrontendStack(app, `${stackPrefix}-Frontend`, {
   env,
   description: 'SparkBoard Frontend - S3 Static Website with CloudFront CDN',
@@ -69,6 +78,15 @@ const frontendStack = new FrontendStack(app, `${stackPrefix}-Frontend`, {
 apiStack.addDependency(storageStack);
 apiStack.addDependency(authStack);
 monitoringStack.addDependency(apiStack);
+messagingStack.addDependency(storageStack);
+messagingStack.addDependency(authStack);
+
+// Configure Items Lambda with notification queue
+apiStack.setNotificationQueue(
+  messagingStack.notificationQueue.queueUrl,
+  messagingStack.notificationQueue.queueArn
+);
+
 frontendStack.addDependency(apiStack);
 frontendStack.addDependency(authStack);
 

@@ -2,10 +2,96 @@
 
 ## 測試架構
 
-本專案採用三層測試策略：
+本專案採用多層測試策略：
 1. **單元測試 (Unit Tests)** - Jest
 2. **契約測試 (Contract Tests)** - OpenAPI + Jest
 3. **壓力測試 (Load Tests)** - k6
+4. **功能測試 (Functional Tests)** - 自動封存、通知系統等
+
+---
+
+## 0. 功能測試指南
+
+### Auto-Archive 功能測試
+
+**測試腳本：** `.\scripts\test-auto-archive.ps1`
+
+這個腳本會自動：
+1. ✅ 建立測試任務
+2. ✅ 將任務標記為完成
+3. ✅ 驗證 autoArchiveAt 被正確設置
+4. ✅ 提供手動觸發封存的指令
+
+**執行方式：**
+```powershell
+.\scripts\test-auto-archive.ps1
+```
+
+**手動測試流程：**
+
+1. **部署更新（必須先做）：**
+```powershell
+# 方法 1: 部署所有堆疊
+.\scripts\deploy-all-stacks.ps1
+
+# 方法 2: 只部署 Storage 和 Api
+cd infra
+cdk deploy SparkBoard-Storage SparkBoard-Api --require-approval never
+```
+
+2. **測試 autoArchiveAt 設置：**
+```powershell
+# 建立並完成一個任務（透過前端或 API）
+# 檢查 DynamoDB 中的 autoArchiveAt 欄位
+aws dynamodb get-item \
+  --table-name SparkTable \
+  --key '{"PK":{"S":"USER#<user-id>"},"SK":{"S":"ITEM#<task-id>"}}' \
+  --projection-expression "SK,#s,completedAt,autoArchiveAt" \
+  --expression-attribute-names '{"#s":"status"}'
+```
+
+3. **測試自動封存：**
+```powershell
+# 設置任務的 autoArchiveAt 為過去時間
+aws dynamodb update-item \
+  --table-name SparkTable \
+  --key '{"PK":{"S":"USER#<user-id>"},"SK":{"S":"ITEM#<task-id>"}}' \
+  --update-expression "SET autoArchiveAt = :time" \
+  --expression-attribute-values '{":time":{"S":"2020-01-01T00:00:00.000Z"}}'
+
+# 等待 1-2 分鐘（EventBridge 每分鐘觸發一次）
+# 檢查任務是否被封存
+aws dynamodb get-item \
+  --table-name SparkTable \
+  --key '{"PK":{"S":"USER#<user-id>"},"SK":{"S":"ITEM#<task-id>"}}' \
+  --projection-expression "SK,#s,archivedAt,archiveStatus" \
+  --expression-attribute-names '{"#s":"status"}'
+```
+
+4. **檢查 CloudWatch Logs：**
+```powershell
+# Items Lambda（檢查 autoArchiveAt 設置）
+aws logs tail /aws/lambda/SparkBoard-Api-ItemsFunction --follow
+
+# AutoArchive Lambda（檢查封存執行）
+aws logs tail /aws/lambda/SparkBoard-Api-AutoArchiveFunction --follow
+```
+
+**測試案例：**
+
+| 案例 | 描述 | 預期 archiveStatus |
+|------|------|-------------------|
+| 1 | 無子任務的已完成任務 | `completed` |
+| 2 | 所有子任務完成的任務 | `completed` |
+| 3 | 部分子任務完成的任務 | `partial` |
+| 4 | 未完成就封存的任務 | `aborted` |
+
+**成功標準：**
+- ✅ 任務完成時設置 autoArchiveAt
+- ✅ 子任務全部完成時也設置 autoArchiveAt（即使 status 沒變）
+- ✅ 到期任務被正確封存
+- ✅ archiveStatus 計算正確
+- ✅ CloudWatch Logs 無錯誤
 
 ---
 

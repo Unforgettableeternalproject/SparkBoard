@@ -26,6 +26,7 @@ export class ApiStack extends cdk.Stack {
   public readonly uploadsFunction: lambda.Function;
   public readonly monitoringFunction: lambda.Function;
   public readonly lambdaFunctions: lambda.Function[];
+  private autoArchiveFunction: lambda.Function;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
@@ -49,7 +50,6 @@ export class ApiStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
       tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
@@ -66,7 +66,7 @@ export class ApiStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
+
       tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
@@ -82,7 +82,7 @@ export class ApiStack extends cdk.Stack {
         TABLE_NAME: table.tableName,
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
+
       tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
@@ -98,7 +98,6 @@ export class ApiStack extends cdk.Stack {
         BUCKET_NAME: bucket.bucketName,
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
       tracing: lambda.Tracing.ACTIVE, // Enable X-Ray
     });
 
@@ -115,7 +114,6 @@ export class ApiStack extends cdk.Stack {
         API_ID: '', // Will be set after API creation
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
       tracing: lambda.Tracing.ACTIVE,
     });
 
@@ -131,7 +129,6 @@ export class ApiStack extends cdk.Stack {
         USER_POOL_ID: userPool.userPoolId,
         NODE_ENV: 'production',
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
       tracing: lambda.Tracing.ACTIVE,
     });
 
@@ -537,13 +534,16 @@ export class ApiStack extends cdk.Stack {
       environment: {
         TABLE_NAME: table.tableName,
         NODE_ENV: 'production',
+        // NOTIFICATION_QUEUE_URL will be added by setNotificationQueue()
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
       tracing: lambda.Tracing.ACTIVE,
     });
 
-    // Grant DynamoDB permissions to auto-archive function
+    // Grant DynamoDB permissions to auto-archive function (read, write, delete)
     table.grantReadWriteData(autoArchiveFunction);
+    
+    // Store reference for notification queue setup
+    this.autoArchiveFunction = autoArchiveFunction;
 
     // EventBridge Rule to trigger auto-archive every minute
     const autoArchiveRule = new events.Rule(this, 'AutoArchiveRule', {
@@ -561,4 +561,30 @@ export class ApiStack extends cdk.Stack {
       description: 'Auto-archive Lambda function name',
     });
   }
+
+  /**
+   * Add notification queue to Items Lambda and AutoArchive Lambda
+   */
+  public setNotificationQueue(queueUrl: string, queueArn: string) {
+    // Add queue URL to Items Lambda environment
+    this.itemsFunction.addEnvironment('NOTIFICATION_QUEUE_URL', queueUrl);
+
+    // Grant send message permission to Items Lambda
+    this.itemsFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['sqs:SendMessage'],
+      resources: [queueArn],
+    }));
+    
+    // Add queue URL to AutoArchive Lambda environment
+    this.autoArchiveFunction.addEnvironment('NOTIFICATION_QUEUE_URL', queueUrl);
+    
+    // Grant send message permission to AutoArchive Lambda
+    this.autoArchiveFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['sqs:SendMessage'],
+      resources: [queueArn],
+    }));
+  }
 }
+
